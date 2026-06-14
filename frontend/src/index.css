@@ -1,0 +1,138 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color-scheme: dark;
+
+  /* Dark theme (default) — RGB component form so Tailwind opacity works */
+  --bg-rgb: 11 13 18;
+  --bg-soft-rgb: 17 20 27;
+  --bg-card-rgb: 22 26 35;
+  --ink-rgb: 229 231 235;
+  --ink-dim-rgb: 156 163 175;
+  --ink-faint-rgb: 107 114 128;
+  --line-rgb: 34 38 50;
+  --line-soft-rgb: 26 29 39;
+  --good-rgb: 34 197 94;
+  --bad-rgb: 239 68 68;
+  --warn-rgb: 245 158 11;
+  --accent-rgb: 96 165 250;
+  --accent-soft-rgb: 59 130 246;
+  --info-rgb: 167 139 250;
+
+  /* Helper hex forms (only used by non-Tailwind CSS like shadows) */
+  --bg: rgb(var(--bg-rgb));
+  --bg-soft: rgb(var(--bg-soft-rgb));
+  --bg-card: rgb(var(--bg-card-rgb));
+  --ink: rgb(var(--ink-rgb));
+  --ink-dim: rgb(var(--ink-dim-rgb));
+  --ink-faint: rgb(var(--ink-faint-rgb));
+  --line: rgb(var(--line-rgb));
+  --line-soft: rgb(var(--line-soft-rgb));
+  --good: rgb(var(--good-rgb));
+  --bad: rgb(var(--bad-rgb));
+  --warn: rgb(var(--warn-rgb));
+  --accent: rgb(var(--accent-rgb));
+  --accent-soft: rgb(var(--accent-soft-rgb));
+  --info: rgb(var(--info-rgb));
+  --scrollbar-track: rgb(var(--bg-rgb));
+  --scrollbar-thumb: rgb(var(--line-rgb));
+  --scrollbar-thumb-hover: rgb(44 49 62);
+}
+
+:root.light,
+.light {
+  color-scheme: light;
+  --bg-rgb: 248 250 252;
+  --bg-soft-rgb: 238 242 247;
+  --bg-card-rgb: 255 255 255;
+  --ink-rgb: 15 23 42;
+  --ink-dim-rgb: 71 85 105;
+  --ink-faint-rgb: 148 163 184;
+  --line-rgb: 226 232 240;
+  --line-soft-rgb: 237 241 246;
+  --good-rgb: 22 163 74;
+  --bad-rgb: 220 38 38;
+  --warn-rgb: 217 119 6;
+  --accent-rgb: 37 99 235;
+  --accent-soft-rgb: 29 78 216;
+  --info-rgb: 124 58 237;
+  --scrollbar-thumb-hover: rgb(148 163 184);
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: var(--scrollbar-track); }
+::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 6px; }
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
+
+.prose {
+  color: var(--ink);
+}
+.prose h1, .prose h2, .prose h3 {
+  color: var(--ink);
+  font-weight: 600;
+  margin-top: 1.25em;
+  margin-bottom: 0.5em;
+}
+.prose table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.75em 0;
+  font-size: 0.875em;
+}
+.prose th, .prose td {
+  border: 1px solid var(--line);
+  padding: 0.5em 0.75em;
+  text-align: left;
+}
+.prose th {
+  background: var(--bg-soft);
+  color: var(--ink);
+}
+.prose tr:nth-child(even) td {
+  background: rgba(0, 0, 0, 0.02);
+}
+.light .prose tr:nth-child(even) td {
+  background: rgba(0, 0, 0, 0.025);
+}
+.prose code {
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 0.85em;
+}
+.prose pre {
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 12px 14px;
+  overflow-x: auto;
+}
+.prose ul li { margin: 0.15em 0; }
+.prose hr { border-color: var(--line); margin: 1.5em 0; }
+.prose strong { color: var(--ink); }
+.prose a { color: var(--accent); }
+
+/* Subtle shadow utility for cards in light mode */
+.light .shadow-sm,
+.light .shadow {
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05), 0 1px 1px rgba(15, 23, 42, 0.03) !important;
+}
+.light .shadow-md,
+.light .shadow-lg,
+.light .shadow-xl {
+  box-shadow: 0 4px 6px -1px rgba(15, 23, 42, 0.08), 0 2px 4px -2px rgba(15, 23, 42, 0.05) !important;
+}

@@ -1,0 +1,12 @@
+# Override for local development — builds from source instead of pulling images.
+# Usage: docker compose up
+services:
+  equity-ark:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./data:/app/data
+      - ./backend/data:/app/backend/data
+    env_file:
+      - ./data/.env
