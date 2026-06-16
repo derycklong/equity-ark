@@ -5,6 +5,8 @@ import { fmtNum, fmtDate, ccySymbol } from "../lib/utils";
 import { Trash2, Plus, Pencil, X, ArrowUpDown, ArrowUp, ArrowDown, Check, Loader2, Save, Upload, AlertOctagon, CheckCircle2, AlertTriangle, Download, FileDown } from "lucide-react";
 import { qk, useTransactions, useInvalidateAll } from "../hooks/usePortfolio";
 import { LoadingScreen } from "../components/LoadingScreen";
+import MobileTable from "../components/MobileTable";
+import ToolbarOverflow from "../components/ToolbarOverflow";
 
 type Tx = {
   id: number | null;
@@ -635,159 +637,221 @@ export default function Transactions() {
   return (
     <div className="space-y-4">
       {/* Header + Stats */}
-      <div className="flex items-end justify-between flex-wrap gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-xl font-semibold">Transactions</h1>
           <p className="text-ink-dim text-sm mt-1">
             {txs.length} transactions · {symbols.size} symbols · {buyCount} buys · {sellCount} sells · S${totalInvested.toLocaleString("en-US", { maximumFractionDigits: 0 })} invested
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          {selected.size > 0 && (
-            <button onClick={handleBulkDelete} disabled={deleting}
-              className="flex items-center gap-1.5 rounded-md border border-bad/40 bg-bad/10 text-bad px-3 py-1.5 text-sm font-medium hover:bg-bad/20 disabled:opacity-60">
-              {deleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-              Delete {selected.size}
-            </button>
-          )}
-          <button
-            onClick={downloadTemplate}
-            title="Download a sample CSV with the correct columns"
-            className="flex items-center gap-1.5 rounded-md border border-line bg-bg-card text-ink-dim px-3 py-1.5 text-sm font-medium hover:text-ink"
-          >
-            <Download size={14} />
-            Template
-          </button>
-          <button
-            onClick={downloadTransactions}
-            title="Download your current transactions as a CSV (round-trip safe)"
-            className="flex items-center gap-1.5 rounded-md border border-line bg-bg-card text-ink-dim px-3 py-1.5 text-sm font-medium hover:text-ink"
-          >
-            <FileDown size={14} />
-            Download
-          </button>
-          <label className={`flex items-center gap-1.5 rounded-md border border-line bg-bg-card px-3 py-1.5 text-sm font-medium text-ink-dim hover:text-ink cursor-pointer ${uploading ? "opacity-60 pointer-events-none" : ""}`}>
-            {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-            {uploading ? "Uploading…" : "Upload CSV"}
-            <input type="file" accept=".csv" hidden disabled={uploading} onChange={onUpload} />
-          </label>
-          <button onClick={async () => { const r = await api.listFundAliases(); setFundAliases(r.aliases); setShowManageAliases(true); }}
-            className="flex items-center gap-1.5 rounded-md border border-line bg-bg-card text-ink-dim px-3 py-1.5 text-sm font-medium hover:text-ink">
-            <Trash2 size={14} />
-            Manage Funds
-          </button>
-          <button onClick={() => { setFormError(null); setModal("add"); }}
-            className="flex items-center gap-1.5 rounded-md border border-good/40 bg-good/10 text-good px-3 py-1.5 text-sm font-medium hover:bg-good/20">
-            <Plus size={14} />
-            Add
-          </button>
-        </div>
+        <ToolbarOverflow
+          primary={
+            <>
+              {selected.size > 0 && (
+                <button onClick={handleBulkDelete} disabled={deleting}
+                  className="flex items-center gap-1.5 rounded-md border border-bad/40 bg-bad/10 text-bad px-3 py-1.5 text-sm font-medium hover:bg-bad/20 disabled:opacity-60">
+                  {deleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                  Delete {selected.size}
+                </button>
+              )}
+              <button onClick={() => { setFormError(null); setModal("add"); }}
+                className="flex items-center gap-1.5 rounded-md border border-good/40 bg-good/10 text-good px-3 py-1.5 text-sm font-medium hover:bg-good/20">
+                <Plus size={14} />
+                Add
+              </button>
+            </>
+          }
+          secondary={
+            <>
+              <MenuItem
+                onClick={downloadTemplate}
+                title="Download a sample CSV with the correct columns"
+                icon={<Download size={14} />}
+                label="Template"
+              />
+              <MenuItem
+                onClick={downloadTransactions}
+                title="Download your current transactions as a CSV (round-trip safe)"
+                icon={<FileDown size={14} />}
+                label="Download"
+              />
+              <UploadMenuItem uploading={uploading} onUpload={onUpload} />
+              <MenuItem
+                onClick={async () => { const r = await api.listFundAliases(); setFundAliases(r.aliases); setShowManageAliases(true); }}
+                icon={<Trash2 size={14} />}
+                label="Manage Funds"
+              />
+            </>
+          }
+        />
       </div>
 
       {/* Filters */}
-      <div className="flex items-center gap-2 flex-wrap">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:flex-wrap">
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search symbol, name, note…"
-          className="rounded-md border border-line bg-bg-card px-3 py-1.5 text-sm w-56"
+          className="rounded-md border border-line bg-bg-card px-3 py-1.5 text-sm w-full sm:w-56"
         />
-        <div className="flex gap-1 text-sm">
-          {["", "buy", "sell"].map((s) => (
-            <button key={s} onClick={() => setSideFilter(s)}
-              className={`px-2 py-1 rounded ${sideFilter === s ? "bg-brand text-white" : "text-ink-dim hover:text-ink bg-bg-card border border-line"}`}>
-              {s || "All"}
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex gap-1 text-sm">
+            {["", "buy", "sell"].map((s) => (
+              <button key={s} onClick={() => setSideFilter(s)}
+                className={`px-2 py-1 rounded ${sideFilter === s ? "bg-brand text-white" : "text-ink-dim hover:text-ink bg-bg-card border border-line"}`}>
+                {s || "All"}
+              </button>
+            ))}
+          </div>
+          <select value={ccyFilter} onChange={(e) => setCcyFilter(e.target.value)}
+            className="rounded-md border border-line bg-bg-card px-2 py-1.5 text-sm">
+            <option value="">All currencies</option>
+            {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+          {search || sideFilter || ccyFilter ? (
+            <button onClick={() => { setSearch(""); setSideFilter(""); setCcyFilter(""); }}
+              className="text-sm text-ink-faint hover:text-ink">
+              Clear filters
             </button>
-          ))}
+          ) : null}
         </div>
-        <select value={ccyFilter} onChange={(e) => setCcyFilter(e.target.value)}
-          className="rounded-md border border-line bg-bg-card px-2 py-1.5 text-sm">
-          <option value="">All currencies</option>
-          {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
-        </select>
-        {search || sideFilter || ccyFilter ? (
-          <button onClick={() => { setSearch(""); setSideFilter(""); setCcyFilter(""); }}
-            className="text-sm text-ink-faint hover:text-ink">
-            Clear filters
-          </button>
-        ) : null}
-        <div className="ml-auto text-sm text-ink-faint">{filtered.length} shown</div>
+        <div className="text-sm text-ink-faint sm:ml-auto">{filtered.length} shown</div>
       </div>
 
-      {/* Table */}
-      <div className="rounded-lg border border-line bg-bg-card overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="text-ink-faint text-sm uppercase bg-bg-soft border-b border-line">
-              <tr>
-                <th className="w-8 px-3 py-2">
-                  <input type="checkbox" checked={selected.size === sorted.length && sorted.length > 0}
-                    onChange={toggleSelectAll} className="rounded" />
-                </th>
-                {(["date", "symbol", "side", "currency", "quantity", "price", "gross_amount"] as SortKey[]).map((k) => {
-                  const hideOnMobile = k === "currency" || k === "quantity" || k === "price";
-                  return (
-                    <th key={k}
-                      className={`px-3 py-2 font-medium cursor-pointer select-none hover:text-ink ${k === "gross_amount" ? "text-right" : "text-left"} ${hideOnMobile ? "hidden sm:table-cell" : ""} ${k === "currency" ? "hidden md:table-cell" : ""}`}
-                      onClick={() => toggleSort(k)}>
-                      <span className="inline-flex items-center gap-1">
-                        {k === "gross_amount" ? "Gross" : k}
-                        <SortIcon k={k} />
-                      </span>
-                    </th>
-                  );
-                })}
-                <th className="text-left px-3 py-2 font-medium hidden md:table-cell">Note</th>
-                <th className="w-16 px-3 py-2"></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-line/50">
-              {sorted.map((t) => (
-                <tr key={t.id || `${t.symbol}-${t.date}-${t.quantity}`}
-                  className={`hover:bg-bg-soft transition-colors ${selected.has(t.id!) ? "bg-brand/5" : ""}`}>
-                  <td className="px-3 py-1.5">
-                    <input type="checkbox" checked={selected.has(t.id!)}
-                      onChange={() => {
-                        const next = new Set(selected);
-                        if (next.has(t.id!)) next.delete(t.id!);
-                        else next.add(t.id!);
-                        setSelected(next);
-                      }} className="rounded" />
-                  </td>
-                  <td className="px-3 py-1.5 text-ink-dim whitespace-nowrap tabular-nums text-sm">{fmtDate(t.date)}</td>
-                  <td className="px-3 py-1.5">
-                    <div className="font-medium whitespace-nowrap leading-tight">{t.name || t.symbol}</div>
-                    {t.name && <div className="text-ink-faint text-sm leading-tight truncate max-w-[160px] tabular-nums">{t.symbol}</div>}
-                  </td>
-                  <td className={`px-3 py-1.5 text-sm font-medium uppercase whitespace-nowrap ${t.side === "buy" ? "text-good" : "text-bad"}`}>
-                    {t.side}
-                  </td>
-                  <td className="px-3 py-1.5 text-ink-faint text-sm font-medium hidden sm:table-cell">{t.currency}</td>
-                  <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap hidden sm:table-cell">{fmtNum(t.quantity, 2)}</td>
-                  <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap hidden sm:table-cell">{fmtNum(t.price, 4)}</td>
-                  <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">
-                    <span className="text-ink-dim text-sm">{ccySymbol(t.currency)}</span>
-                    {fmtNum(t.gross_amount, 2)}
-                  </td>
-                  <td className="px-3 py-1.5 text-ink-faint text-sm truncate max-w-[120px] hidden md:table-cell">{t.note || ""}</td>
-                  <td className="px-3 py-1.5">
-                    <div className="flex items-center gap-1">
-                      <button onClick={() => { setFormError(null); setModal({ edit: t }); }}
-                        className="p-1 rounded text-ink-faint hover:text-ink hover:bg-bg-soft" title="Edit">
-                        <Pencil size={13} />
-                      </button>
-                      <button onClick={() => handleDeleteOne(t)}
-                        className="p-1 rounded text-ink-faint hover:text-bad hover:bg-bad/10" title="Delete">
-                        <Trash2 size={13} />
-                      </button>
-                    </div>
-                  </td>
+      {/* Table + mobile card list */}
+      <MobileTable
+        items={sorted}
+        keyOf={(t) => t.id ?? `${t.symbol}-${t.date}-${t.quantity}`}
+        empty="No transactions match the current filters."
+        renderCard={(t) => (
+          <div className={`rounded-lg border border-line bg-bg-card p-3 ${selected.has(t.id!) ? "ring-1 ring-brand/40" : ""}`}>
+            <div className="flex items-start justify-between gap-2">
+              <label className="flex items-start gap-2 min-w-0 flex-1">
+                <input
+                  type="checkbox"
+                  checked={selected.has(t.id!)}
+                  onChange={() => {
+                    const next = new Set(selected);
+                    if (next.has(t.id!)) next.delete(t.id!);
+                    else next.add(t.id!);
+                    setSelected(next);
+                  }}
+                  className="rounded mt-1 shrink-0"
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-baseline gap-2 flex-wrap">
+                    <span className="font-medium truncate leading-tight">{t.name || t.symbol}</span>
+                    {t.name && <span className="text-ink-faint text-sm tabular-nums truncate">{t.symbol}</span>}
+                    <span className={`text-xs font-semibold uppercase ${t.side === "buy" ? "text-good" : "text-bad"}`}>
+                      {t.side}
+                    </span>
+                  </div>
+                  <div className="text-xs text-ink-faint tabular-nums mt-0.5">
+                    {fmtDate(t.date)} · {t.exchange} · {t.currency}
+                  </div>
+                </div>
+              </label>
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  onClick={() => { setFormError(null); setModal({ edit: t }); }}
+                  className="p-1.5 rounded text-ink-faint hover:text-ink hover:bg-bg-soft"
+                  title="Edit"
+                >
+                  <Pencil size={14} />
+                </button>
+                <button
+                  onClick={() => handleDeleteOne(t)}
+                  className="p-1.5 rounded text-ink-faint hover:text-bad hover:bg-bad/10"
+                  title="Delete"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            </div>
+            <div className="mt-2 grid grid-cols-3 gap-2 text-sm">
+              <Mini label="Qty" value={fmtNum(t.quantity, 2)} />
+              <Mini label="Price" value={fmtNum(t.price, 4)} />
+              <Mini label="Gross" value={`${ccySymbol(t.currency)}${fmtNum(t.gross_amount, 2)}`} align="right" />
+            </div>
+            {t.note && (
+              <div className="mt-1.5 text-xs text-ink-faint truncate">{t.note}</div>
+            )}
+          </div>
+        )}
+        renderTable={() => (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-ink-faint text-sm uppercase bg-bg-soft border-b border-line">
+                <tr>
+                  <th className="w-8 px-3 py-2">
+                    <input type="checkbox" checked={selected.size === sorted.length && sorted.length > 0}
+                      onChange={toggleSelectAll} className="rounded" />
+                  </th>
+                  {(["date", "symbol", "side", "currency", "quantity", "price", "gross_amount"] as SortKey[]).map((k) => {
+                    const hideOnMobile = k === "currency" || k === "quantity" || k === "price";
+                    return (
+                      <th key={k}
+                        className={`px-3 py-2 font-medium cursor-pointer select-none hover:text-ink ${k === "gross_amount" ? "text-right" : "text-left"} ${hideOnMobile ? "hidden sm:table-cell" : ""} ${k === "currency" ? "hidden md:table-cell" : ""}`}
+                        onClick={() => toggleSort(k)}>
+                        <span className="inline-flex items-center gap-1">
+                          {k === "gross_amount" ? "Gross" : k}
+                          <SortIcon k={k} />
+                        </span>
+                      </th>
+                    );
+                  })}
+                  <th className="text-left px-3 py-2 font-medium hidden md:table-cell">Note</th>
+                  <th className="w-16 px-3 py-2"></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+              </thead>
+              <tbody className="divide-y divide-line/50">
+                {sorted.map((t) => (
+                  <tr key={t.id || `${t.symbol}-${t.date}-${t.quantity}`}
+                    className={`hover:bg-bg-soft transition-colors ${selected.has(t.id!) ? "bg-brand/5" : ""}`}>
+                    <td className="px-3 py-1.5">
+                      <input type="checkbox" checked={selected.has(t.id!)}
+                        onChange={() => {
+                          const next = new Set(selected);
+                          if (next.has(t.id!)) next.delete(t.id!);
+                          else next.add(t.id!);
+                          setSelected(next);
+                        }} className="rounded" />
+                    </td>
+                    <td className="px-3 py-1.5 text-ink-dim whitespace-nowrap tabular-nums text-sm">{fmtDate(t.date)}</td>
+                    <td className="px-3 py-1.5">
+                      <div className="font-medium whitespace-nowrap leading-tight">{t.name || t.symbol}</div>
+                      {t.name && <div className="text-ink-faint text-sm leading-tight truncate max-w-[160px] tabular-nums">{t.symbol}</div>}
+                    </td>
+                    <td className={`px-3 py-1.5 text-sm font-medium uppercase whitespace-nowrap ${t.side === "buy" ? "text-good" : "text-bad"}`}>
+                      {t.side}
+                    </td>
+                    <td className="px-3 py-1.5 text-ink-faint text-sm font-medium hidden sm:table-cell">{t.currency}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap hidden sm:table-cell">{fmtNum(t.quantity, 2)}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap hidden sm:table-cell">{fmtNum(t.price, 4)}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">
+                      <span className="text-ink-dim text-sm">{ccySymbol(t.currency)}</span>
+                      {fmtNum(t.gross_amount, 2)}
+                    </td>
+                    <td className="px-3 py-1.5 text-ink-faint text-sm truncate max-w-[120px] hidden md:table-cell">{t.note || ""}</td>
+                    <td className="px-3 py-1.5">
+                      <div className="flex items-center gap-1">
+                        <button onClick={() => { setFormError(null); setModal({ edit: t }); }}
+                          className="p-1.5 rounded text-ink-faint hover:text-ink hover:bg-bg-soft" title="Edit">
+                          <Pencil size={13} />
+                        </button>
+                        <button onClick={() => handleDeleteOne(t)}
+                          className="p-1.5 rounded text-ink-faint hover:text-bad hover:bg-bad/10" title="Delete">
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      />
 
       {/* Modal */}
       {modal && (
@@ -849,6 +913,79 @@ export default function Transactions() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function MenuItem({
+  onClick,
+  icon,
+  label,
+  title,
+}: {
+  onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
+  title?: string;
+}) {
+  // Renders as a desktop inline button on md+ and as a full-width row item
+  // inside the mobile dropdown (ToolbarOverflow wraps these in a column).
+  return (
+    <>
+      <button
+        type="button"
+        onClick={onClick}
+        title={title}
+        className="hidden md:flex items-center gap-1.5 rounded-md border border-line bg-bg-card text-ink-dim px-3 py-1.5 text-sm font-medium hover:text-ink"
+      >
+        {icon}
+        {label}
+      </button>
+      <button
+        type="button"
+        onClick={onClick}
+        title={title}
+        className="md:hidden flex items-center gap-2 w-full text-left px-3 py-2 text-sm text-ink hover:bg-bg-soft"
+      >
+        <span className="text-ink-dim">{icon}</span>
+        <span>{label}</span>
+      </button>
+    </>
+  );
+}
+
+function UploadMenuItem({
+  uploading,
+  onUpload,
+}: {
+  uploading: boolean;
+  onUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
+}) {
+  return (
+    <>
+      <label
+        className={`hidden md:flex items-center gap-1.5 rounded-md border border-line bg-bg-card text-ink-dim px-3 py-1.5 text-sm font-medium hover:text-ink cursor-pointer ${uploading ? "opacity-60 pointer-events-none" : ""}`}
+      >
+        {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+        {uploading ? "Uploading…" : "Upload CSV"}
+        <input type="file" accept=".csv" hidden disabled={uploading} onChange={onUpload} />
+      </label>
+      <label
+        className={`md:hidden flex items-center gap-2 w-full text-left px-3 py-2 text-sm text-ink hover:bg-bg-soft cursor-pointer ${uploading ? "opacity-60 pointer-events-none" : ""}`}
+      >
+        <span className="text-ink-dim">{uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}</span>
+        <span>{uploading ? "Uploading…" : "Upload CSV"}</span>
+        <input type="file" accept=".csv" hidden disabled={uploading} onChange={onUpload} />
+      </label>
+    </>
+  );
+}
+
+function Mini({ label, value, align = "left" }: { label: string; value: string; align?: "left" | "right" }) {
+  return (
+    <div className={`min-w-0 ${align === "right" ? "text-right" : ""}`}>
+      <div className="text-[10px] uppercase tracking-wider text-ink-faint leading-tight">{label}</div>
+      <div className="text-sm font-medium tabular-nums truncate leading-tight">{value}</div>
     </div>
   );
 }

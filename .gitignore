@@ -8,6 +8,7 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .venv/
+*.tsbuildinfo
 
 # Secrets and local data — never commit
 **/.env

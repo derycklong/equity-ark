@@ -25,6 +25,11 @@ export default function NetWorthChart({ ccy }: NetWorthChartProps) {
   });
   const data = networthData?.history || [];
   const error = queryError ? (queryError instanceof Error ? queryError.message : String(queryError)) : null;
+  // Track whether we're on a narrow viewport so the x-axis can show a
+  // short month label on mobile and the full date on desktop.
+  const [isNarrow, setIsNarrow] = useState<boolean>(() =>
+    typeof window !== "undefined" ? window.innerWidth < 640 : false,
+  );
   // Track colors in state so they update AFTER the DOM class flip from
   // ThemeProvider's useEffect has been applied.
   const [colors, setColors] = useState(() => ({
@@ -58,6 +63,15 @@ export default function NetWorthChart({ ccy }: NetWorthChartProps) {
     });
     return () => observer.disconnect();
   }, [theme]);
+
+  // Track viewport width so the x-axis label switches between
+  // a short month (mobile) and the full date (desktop).
+  useEffect(() => {
+    const onResize = () => setIsNarrow(window.innerWidth < 640);
+    onResize();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   const latest = data[data.length - 1];
 
@@ -97,7 +111,22 @@ export default function NetWorthChart({ ccy }: NetWorthChartProps) {
         type: "category",
         data: dates,
         axisLine: { lineStyle: { color: gridColor } },
-        axisLabel: { color: textColor },
+        axisLabel: {
+          color: textColor,
+          formatter: (value: string) => {
+            // value is "YYYY-MM-DD"; show short month on narrow viewports.
+            if (isNarrow) {
+              const [, m] = value.split("-");
+              const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                                  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+              const idx = parseInt(m, 10) - 1;
+              return monthNames[idx] ?? value;
+            }
+            return value;
+          },
+          // Hide every other label on narrow so they don't collide.
+          interval: isNarrow ? "auto" : 0,
+        },
       },
       yAxis: [
         {
@@ -150,7 +179,7 @@ export default function NetWorthChart({ ccy }: NetWorthChartProps) {
         },
       ],
     };
-  }, [data, ccy, colors]);
+  }, [data, ccy, colors, isNarrow]);
 
   useEffect(() => {
     if (!chartRef.current) return;
@@ -180,13 +209,13 @@ export default function NetWorthChart({ ccy }: NetWorthChartProps) {
       </div>
 
       {loading ? (
-        <div className="h-64 flex items-center justify-center text-ink-dim text-sm">Loading chart…</div>
+        <div className="h-56 sm:h-64 flex items-center justify-center text-ink-dim text-sm">Loading chart…</div>
       ) : error ? (
-        <div className="h-64 flex items-center justify-center text-bad text-sm">{error}</div>
+        <div className="h-56 sm:h-64 flex items-center justify-center text-bad text-sm">{error}</div>
       ) : data.length === 0 ? (
-        <div className="h-64 flex items-center justify-center text-ink-dim text-sm">No data</div>
+        <div className="h-56 sm:h-64 flex items-center justify-center text-ink-dim text-sm">No data</div>
       ) : (
-        <div ref={chartRef} className="h-64 w-full" />
+        <div ref={chartRef} className="h-56 sm:h-64 w-full" />
       )}
     </div>
   );

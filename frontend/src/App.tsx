@@ -1,10 +1,11 @@
 import { Link, NavLink, Outlet, Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { LayoutDashboard, Briefcase, History, Coins, Sparkles, Repeat2, Database, LogOut, Menu, X, Sun, Moon } from "lucide-react";
-import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { LayoutDashboard, Briefcase, History, Coins, Sparkles, Repeat2, Database, LogOut, Menu, X, Sun, Moon, Shield } from "lucide-react";
+import { useEffect, useState } from "react";
 import { api } from "./lib/api";
 import { useStore } from "./stores/useStore";
-import { cn } from "./lib/utils";
+import { cn, timeAgo } from "./lib/utils";
+import { useDashboard } from "./hooks/usePortfolio";
 import Logo from "./components/Logo";
 import { useTheme } from "./hooks/useTheme";
 import Login from "./pages/Login";
@@ -15,6 +16,7 @@ import Roundtrips from "./pages/Roundtrips";
 import Dividends from "./pages/Dividends";
 import Advice from "./pages/Advice";
 import AddTransaction from "./pages/AddTransaction";
+import Admin from "./pages/Admin";
 import { RequireAuth } from "./components/RequireAuth";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 
@@ -35,6 +37,15 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const { theme, toggleTheme } = useTheme();
   const [cacheRefreshing, setCacheRefreshing] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  // Subscribe to the dashboard query purely for the cache timestamp. The
+  // query is shared with the Dashboard page (same key), so this doesn't
+  // add a network request when the dashboard has already loaded.
+  const dashboard = useDashboard();
+
+  // Admin link is only rendered for users marked `is_admin` in /api/auth/me.
+  const items = user?.is_admin
+    ? [...navItems, { to: "/admin", label: "Admin", icon: Shield }]
+    : navItems;
 
   async function onCacheRefresh() {
     setCacheRefreshing(true);
@@ -80,7 +91,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         </button>
       </div>
       <nav className="flex flex-col gap-1 flex-1">
-        {navItems.map(({ to, label, icon: Icon, end }) => (
+        {items.map(({ to, label, icon: Icon, end }) => (
           <NavLink
             key={to}
             to={to}
@@ -108,6 +119,19 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           <Database size={14} className={cacheRefreshing ? "animate-spin" : ""} />
           {cacheRefreshing ? "Refreshing…" : "Refresh"}
         </button>
+        {dashboard.data?.last_refreshed_at && (
+          <div
+            className="px-3 text-xs text-ink-faint"
+            title={`Dashboard cache was last rebuilt on ${new Date(
+              dashboard.data.last_refreshed_at * 1000,
+            ).toLocaleString()}`}
+          >
+            Last refresh:{" "}
+            <span className="tabular-nums">
+              {timeAgo(dashboard.data.last_refreshed_at)}
+            </span>
+          </div>
+        )}
         {user && (
           <div className="mt-2 pt-2 border-t border-line">
             <div className="flex items-center gap-2 px-1 py-1">
@@ -236,6 +260,7 @@ export default function App() {
           <Route path="/roundtrips" element={<Roundtrips />} />
           <Route path="/dividends" element={<Dividends />} />
           <Route path="/advice" element={<Advice />} />
+          <Route path="/admin" element={<Admin />} />
           <Route path="*" element={<Dashboard />} />
         </Route>
       </Routes>

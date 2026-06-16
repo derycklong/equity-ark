@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
 import { api } from "../lib/api";
-import { fmtDate, ccySymbol, fmtMoneyFull, fmtPct } from "../lib/utils";
+import { fmtDate, ccySymbol, fmtMoneyFull, fmtPct, fmtNum } from "../lib/utils";
 import { Coins, Building2, ArrowUpRight, ArrowDownRight, RefreshCw, ChevronDown, ChevronUp, BarChart3, Calendar, Wallet, TrendingUp, ListChecks } from "lucide-react";
 import { useDividends, useHoldings, useInvalidateAll } from "../hooks/usePortfolio";
 import { LoadingScreen } from "../components/LoadingScreen";
+import MobileTable from "../components/MobileTable";
 
 const BASE_CCY = "SGD";
 
@@ -28,7 +29,8 @@ export default function Dividends() {
   const [ccyFilter, setCcyFilter] = useState<string>("ALL");
   const [refreshing, setRefreshing] = useState(false);
   const [refreshMsg, setRefreshMsg] = useState<string | null>(null);
-  const [openCard, setOpenCard] = useState<CardId>("kpi");
+  // Default the snapshot card open.
+  const [openCard, setOpenCard] = useState<CardId | "">("kpi");
 
   const toggleCard = (id: CardId) => {
     setOpenCard((curr) => (curr === id ? "" : id) as CardId);
@@ -249,7 +251,7 @@ export default function Dividends() {
   if (!data) return <div>No data</div>;
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 lg:flex lg:flex-col lg:h-[calc(100vh-4rem)]">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1">
         <h1 className="text-xl font-semibold flex items-center gap-2">
@@ -273,9 +275,10 @@ export default function Dividends() {
         </div>
       </div>
 
-      {/* === 2-column layout: Left = transactions, Right = accordion cards === */}
-      <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-3">
-        {/* LEFT — All dividend transactions (full height) */}
+      {/* === Mobile: transactions only (full width) === */}
+      {/* === Desktop: 2-column layout: Left = transactions, Right = accordion cards === */}
+      <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-3 lg:flex-1 lg:min-h-0">
+        {/* LEFT — All dividend transactions */}
         <div className="rounded-lg border border-line bg-bg-card overflow-hidden lg:row-span-1 flex flex-col">
           <div className="px-3 py-2 border-b border-line flex items-center justify-between gap-2 bg-bg-soft shrink-0">
             <h2 className="text-sm font-medium shrink-0 flex items-center gap-1.5">
@@ -303,54 +306,99 @@ export default function Dividends() {
               })}
             </div>
           </div>
-          <div className="flex-1 min-h-0 overflow-auto" style={{ maxHeight: "calc(100vh - 220px)" }}>
-            <table className="w-full text-sm">
-              <thead className="text-ink-faint text-sm uppercase sticky top-0 bg-bg-card border-b border-line">
-                <tr>
-                  <th className="text-left px-3 py-1.5 font-medium">Ex-date</th>
-                  <th className="text-left px-2 py-1.5 font-medium">Symbol</th>
-                  <th className="text-right px-2 py-1.5 font-medium hidden sm:table-cell">Shares</th>
-                  <th className="text-right px-2 py-1.5 font-medium hidden sm:table-cell">Per share</th>
-                  <th className="text-right px-2 py-1.5 font-medium">Received</th>
-                  <th className="text-right px-3 py-1.5 font-medium">In {BASE_CCY}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredEvents.map((e: any, i: number) => (
-                  <tr key={`${e.symbol}-${e.ex_date}-${i}`} className="border-t border-line/50 hover:bg-bg-soft">
-                    <td className="px-3 py-1.5 text-ink-dim tabular-nums whitespace-nowrap">{fmtDate(e.ex_date)}</td>
-                    <td className="px-2 py-1.5 whitespace-nowrap">
-                      <div className="text-sm font-medium leading-tight">{e.name || e.symbol}</div>
-                      {e.name && <div className="text-ink-faint text-sm leading-tight tabular-nums">{e.symbol}</div>}
-                    </td>
-                    <td className="px-2 py-1.5 text-right tabular-nums whitespace-nowrap hidden sm:table-cell">
-                      {e.shares_at_ex.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </td>
-                    <td className="px-2 py-1.5 text-right tabular-nums text-ink-dim whitespace-nowrap hidden sm:table-cell">
-                      {ccySymbol(e.currency)}{e.amount_per_share.toLocaleString("en-US", { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
-                    </td>
-                    <td className="px-2 py-1.5 text-right tabular-nums text-warn whitespace-nowrap">
-                      {ccySymbol(e.currency)}{e.total_received.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </td>
-                    <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap font-medium">
-                      {fmtMoneyFull((e.total_received || 0) * (rateOf(e) || 0), BASE_CCY)}
-                    </td>
-                  </tr>
-                ))}
-                {filteredEvents.length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="px-3 py-6 text-center text-ink-faint text-sm">
-                      No dividend events
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+          <div className="flex-1 min-h-0 overflow-auto">
+            <MobileTable
+              items={filteredEvents}
+              keyOf={(e: any, i: number) => `${e.symbol}-${e.ex_date}-${i}`}
+              empty="No dividend events"
+              renderCard={(e: any) => (
+                <div className="rounded-lg border border-line bg-bg-card p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="font-medium truncate leading-tight">{e.name || e.symbol}</div>
+                      {e.name && <div className="text-ink-faint text-sm tabular-nums truncate">{e.symbol}</div>}
+                      <div className="text-xs text-ink-faint tabular-nums mt-0.5">
+                        {fmtDate(e.ex_date)} · {e.currency}
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="text-sm font-semibold tabular-nums text-warn">
+                        {ccySymbol(e.currency)}{e.total_received.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </div>
+                      <div className="text-xs tabular-nums text-ink-faint mt-0.5">
+                        = {fmtMoneyFull((e.total_received || 0) * (rateOf(e) || 0), BASE_CCY)}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-2 pt-2 border-t border-line/50 grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <div className="text-[10px] uppercase tracking-wider text-ink-faint leading-tight">Shares</div>
+                      <div className="text-sm tabular-nums leading-tight">
+                        {e.shares_at_ex.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-[10px] uppercase tracking-wider text-ink-faint leading-tight">Per share</div>
+                      <div className="text-sm tabular-nums leading-tight text-ink-dim">
+                        {ccySymbol(e.currency)}{e.amount_per_share.toLocaleString("en-US", { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+              renderTable={() => (
+                <table className="w-full text-sm">
+                  <thead className="text-ink-faint text-sm uppercase sticky top-0 bg-bg-card border-b border-line">
+                    <tr>
+                      <th className="text-left px-3 py-1.5 font-medium">Ex-date</th>
+                      <th className="text-left px-2 py-1.5 font-medium">Symbol</th>
+                      <th className="text-right px-2 py-1.5 font-medium hidden sm:table-cell">Shares</th>
+                      <th className="text-right px-2 py-1.5 font-medium hidden sm:table-cell">Per share</th>
+                      <th className="text-right px-2 py-1.5 font-medium">Received</th>
+                      <th className="text-right px-3 py-1.5 font-medium">In {BASE_CCY}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredEvents.map((e: any, i: number) => (
+                      <tr key={`${e.symbol}-${e.ex_date}-${i}`} className="border-t border-line/50 hover:bg-bg-soft">
+                        <td className="px-3 py-1.5 text-ink-dim tabular-nums whitespace-nowrap">{fmtDate(e.ex_date)}</td>
+                        <td className="px-2 py-1.5 whitespace-nowrap">
+                          <div className="text-sm font-medium leading-tight">{e.name || e.symbol}</div>
+                          {e.name && <div className="text-ink-faint text-sm leading-tight tabular-nums">{e.symbol}</div>}
+                        </td>
+                        <td className="px-2 py-1.5 text-right tabular-nums whitespace-nowrap hidden sm:table-cell">
+                          {e.shares_at_ex.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                        <td className="px-2 py-1.5 text-right tabular-nums text-ink-dim whitespace-nowrap hidden sm:table-cell">
+                          {ccySymbol(e.currency)}{e.amount_per_share.toLocaleString("en-US", { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
+                        </td>
+                        <td className="px-2 py-1.5 text-right tabular-nums text-warn whitespace-nowrap">
+                          {ccySymbol(e.currency)}{e.total_received.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                        <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap font-medium">
+                          {fmtMoneyFull((e.total_received || 0) * (rateOf(e) || 0), BASE_CCY)}
+                        </td>
+                      </tr>
+                    ))}
+                    {filteredEvents.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="px-3 py-6 text-center text-ink-faint text-sm">
+                          No dividend events
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              )}
+            />
           </div>
         </div>
 
-        {/* RIGHT — Accordion cards */}
-        <div className="space-y-2">
+        {/* RIGHT — Accordion cards (desktop only).
+            Sticky so it stays in view as the left table scrolls internally,
+            and `self-start` so the column doesn't stretch to fill the grid
+            track (which would visually stretch the Snapshot card). */}
+        <div className="hidden lg:block lg:self-start lg:sticky lg:top-4 space-y-2">
           {/* Card 1: KPI snapshot */}
           <AccordionCard
             id="kpi"

@@ -66,6 +66,14 @@ html, body, #root {
   height: 100%;
 }
 
+html {
+  /* Stop iOS Safari from auto-zooming when a small text input is focused */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  /* Improve momentum scrolling in any overflow container */
+  -webkit-overflow-scrolling: touch;
+}
+
 body {
   background: var(--bg);
   color: var(--ink);
@@ -76,6 +84,21 @@ body {
 ::-webkit-scrollbar-track { background: var(--scrollbar-track); }
 ::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 6px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
+
+/* Slimmer horizontal scrollbar inside wide tables on touch devices */
+.overflow-x-auto {
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+.overflow-x-auto::-webkit-scrollbar { height: 6px; }
+.overflow-x-auto::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 3px; }
+
+/* Make the modal backdrop and table cells friendlier to touch targets */
+@media (max-width: 640px) {
+  /* Slightly larger hit areas for icon-only buttons */
+  button[title] { min-height: 28px; }
+}
 
 .prose {
   color: var(--ink);

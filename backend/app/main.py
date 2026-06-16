@@ -24,6 +24,7 @@ from .services.advice import generate_advice, compute_findings
 from .services.csv_parser import resolve_symbol
 from .store import PortfolioStore
 from .store_manager import StoreManager
+from .env_config import get_admin_emails
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("vibe-portfolio")
@@ -272,6 +273,27 @@ if _ENV_FILE.exists():
             if _key not in os.environ:
                 os.environ[_key] = _val
 
+# Log the admin config so it's obvious at startup whether admin is enabled.
+_admin_emails = get_admin_emails()
+if _admin_emails:
+    logger.info(
+        "Admin enabled for %d email(s): %s (set in data/.env as ADMIN_EMAILS)",
+        len(_admin_emails),
+        ", ".join(_admin_emails),
+    )
+    if os.environ.get("ADMIN_EMAILS"):
+        # Both could be set; if only the new name is used, no warning.
+        pass
+    elif os.environ.get("ADMIN_EMAIL"):
+        logger.warning(
+            "ADMIN_EMAIL is deprecated; rename to ADMIN_EMAILS in data/.env "
+            "(supports multiple comma-separated admins).",
+        )
+else:
+    logger.info(
+        "Admin disabled — set ADMIN_EMAILS=you@example.com in data/.env and restart to enable /admin",
+    )
+
 SESSION_COOKIE_NAME = "vibe_session"
 SESSION_SECRET = os.environ.get("SESSION_SECRET") or secrets.token_urlsafe(32)
 if not os.environ.get("SESSION_SECRET"):
@@ -348,7 +370,18 @@ def get_user_store(request: Request, user: dict = Depends(get_current_user)) -> 
 
 @app.get("/api/auth/me")
 def auth_me(user: dict = Depends(get_current_user)) -> dict:
-    return {"user": user}
+    admins = get_admin_emails()
+    user_out = dict(user)
+    user_out["is_admin"] = user.get("email", "").lower() in admins
+    return {"user": user_out}
+
+
+def require_admin(user: dict = Depends(get_current_user)) -> dict:
+    """FastAPI dependency: 403 unless the caller's email is in ADMIN_EMAILS."""
+    admins = get_admin_emails()
+    if user.get("email", "").lower() not in admins:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user
 
 
 @app.get("/api/auth/google/login")
@@ -410,6 +443,15 @@ def auth_logout(request: Request, response: Response, user: dict = Depends(get_c
     return {"status": "ok"}
 
 
+# ----------------------------- admin ------------------------------------------
+
+@app.get("/api/admin/users")
+def admin_list_users(request: Request, admin: dict = Depends(require_admin)) -> dict:
+    """Return every known user with last-login timestamp. Admin-only."""
+    users = request.app.state.store_manager.db.list_all_users()
+    return {"users": users, "admin_emails": get_admin_emails()}
+
+
 # ----------------------------- helpers ---------------------------------------
 
 def _llm_config() -> Optional[dict]:
@@ -438,7 +480,7 @@ def health() -> dict:
 
 # ----- daily scheduler -----
 def _daily_scheduler():
-    """Refresh dividend data + dashboard cache for all active stores at 8am daily.
+    """Refresh dividend data + dashboard cache for all active stores at 6am daily.
 
     The dividend refresh picks up new dividend declarations from yfinance
     (e.g. when a company declares a new quarterly dividend overnight,
@@ -446,19 +488,29 @@ def _daily_scheduler():
     The dashboard cache rebuild then propagates the updated values to the UI.
     """
     import datetime
+    from datetime import timedelta
     while True:
         now = _time.time()
-        today_8am = datetime.datetime.now().replace(hour=8, minute=0, second=0, microsecond=0)
-        if datetime.datetime.now().hour >= 8:
-            next_8am = today_8am + datetime.timedelta(days=1)
+        today_6am = datetime.datetime.now().replace(hour=6, minute=0, second=0, microsecond=0)
+        if datetime.datetime.now().hour >= 6:
+            next_6am = today_6am + timedelta(days=1)
         else:
-            next_8am = today_8am
-        wait = (next_8am - datetime.datetime.now()).total_seconds()
+            next_6am = today_6am
+        wait = (next_6am - datetime.datetime.now()).total_seconds()
         if wait > 0:
             _time.sleep(wait)
         try:
-            for uid, store in list(app.state.store_manager._stores.items()):
+            # Iterate over ALL known users (not just currently-cached stores).
+            # Stores are LRU-cached and only created on demand when a user
+            # makes a request, so iterating `store_manager._stores` would
+            # silently skip any user who wasn't logged in at 6am — meaning
+            # their dashboard cache would stay stale until they next hit
+            # "Refresh" manually. Touching each user via get_store() ensures
+            # the scheduler refreshes everyone, even overnight.
+            sm = app.state.store_manager
+            for uid in sm.list_users():
                 try:
+                    store = sm.get_store(uid)
                     # Dividends: force=True so we bypass the 7-day negative
                     # cache and re-verify every symbol. This is what lets
                     # future / newly-declared dividends appear in the UI
@@ -468,8 +520,22 @@ def _daily_scheduler():
                         store.refresh_dividends(force=True)
                     except Exception as e:
                         logger.warning("Daily dividend refresh failed for user %s: %s", uid, e)
-                    # Prices + cache rebuild with normal TTLs (force=False)
-                    store.rebuild_dashboard_cache(force=False)
+                    # Prices + cache rebuild with force=True so the
+                    # scheduled 6am job actually pulls fresh yfinance data
+                    # instead of reusing yesterday's SQLite price_cache.
+                    # Manual "Refresh" also uses force=True; the per-request
+                    # SQLite cache still avoids hitting yfinance on every
+                    # page load.
+                    store.rebuild_dashboard_cache(force=True)
+                    # Pre-warm the networth history (the in-memory 24h cache
+                    # was just invalidated by rebuild_dashboard_cache above).
+                    # Doing it here means the user's first page load after
+                    # 6am shows the chart instantly instead of waiting on
+                    # a yfinance `yf.download` round-trip.
+                    try:
+                        store.get_networth_history()
+                    except Exception as e:
+                        logger.warning("Daily networth history pre-warm failed for user %s: %s", uid, e)
                 except Exception as e:
                     logger.warning("Daily refresh failed for user %s: %s", uid, e)
             logger.info("Daily refresh completed")
@@ -677,16 +743,20 @@ async def portfolio_upload(request: Request, file: UploadFile = File(...),
 def refresh_dashboard_cache(store: PortfolioStore = Depends(get_user_store)) -> dict:
     """Refresh all live data (prices + dividends) and rebuild the dashboard cache.
 
-    Single entry point for both the daily 8am scheduler and the manual
-    "Refresh" button. Manual clicks always force a fresh yfinance fetch
-    (bypassing the SQLite price_cache TTL and the in-memory
-    MarketDataService TTL) so the user sees the latest prices. The daily
-    scheduler is wired to call `rebuild_dashboard_cache(force=False)` to
-    keep cache hits.
+    Single entry point for both the daily 6am scheduler and the manual
+    "Refresh" button. Both pass `force=True` to bypass the SQLite
+    price_cache TTL and the in-memory MarketDataService TTL so the cache
+    is always fresh. The per-request cache still avoids hitting yfinance
+    on every page load.
 
     Returns counts of what was updated.
     """
     result = store.rebuild_dashboard_cache(force=True)
+    # Pre-warm the networth chart cache so the chart is instant on next load.
+    try:
+        store.get_networth_history()
+    except Exception as e:
+        logger.warning("Networth history pre-warm failed: %s", e)
     return {
         "holdings": result.get("holdings", 0),
         "prices_updated": result.get("prices_updated", 0),

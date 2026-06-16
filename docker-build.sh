@@ -4,7 +4,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 IMAGE="derycklong/equity-ark"
-TAG="2026.6.14"
+TAG="2026.6.16"
 
 echo ">>> Building image..."
 docker build -t "$IMAGE:$TAG" -t "$IMAGE:latest" "$ROOT"

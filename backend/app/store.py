@@ -885,11 +885,11 @@ class PortfolioStore:
 
         Args:
             ttl: in-memory TTL for MarketDataService (seconds).
-            force: when True, bypass both the SQLite price_cache (24h TTL)
-                and the MarketDataService in-memory TTL — always hit
-                yfinance. The daily 8am scheduler uses the cache to avoid
-                rate limits; manual "Refresh" uses force=True so the user
-                sees the latest prices.
+        force: when True, bypass both the SQLite price_cache (24h TTL)
+            and the MarketDataService in-memory TTL — always hit
+            yfinance. Both the daily 6am scheduler and manual "Refresh"
+            pass force=True so the user always sees the latest prices
+            after the scheduled or manual run completes.
         """
         CACHE_MAX_AGE = 86400  # 24h — use cached price instead of hitting yfinance
         ERROR_CACHE_AGE = 604800  # 7d — delisted stocks are permanent, don't re-fetch often
@@ -1079,9 +1079,9 @@ class PortfolioStore:
             force: bypass all caches (SQLite price_cache TTL,
                 MarketDataService in-memory TTL, dividend negative cache)
                 so the next "Refresh" click always returns the latest data
-                from yfinance. The daily 8am scheduler uses the default
-                (force=False) to avoid hammering yfinance; manual clicks
-                should pass force=True.
+                from yfinance. Both the daily 6am scheduler and manual
+                "Refresh" pass force=True so the cache is always fresh
+                when the user loads the dashboard.
         """
         import json
         with self._lock:
@@ -1118,6 +1118,7 @@ class PortfolioStore:
                 holdings = self.get_holdings()
                 dividends = self.get_dividends()
                 benchmarks = self.get_benchmarks()
+                now_ts = time.time()
                 cache = {
                     "summary": summary,
                     "breakdown": breakdown,
@@ -1125,6 +1126,7 @@ class PortfolioStore:
                     "holdings": holdings,
                     "dividends": dividends,
                     "benchmarks": benchmarks,
+                    "last_refreshed_at": now_ts,
                 }
                 self.db.save_dashboard_cache(self.user_id, "dashboard", json.dumps(cache, default=str))
             except Exception as e:
@@ -1144,11 +1146,20 @@ class PortfolioStore:
             }
 
     def get_dashboard_cache(self) -> Optional[dict]:
-        """Load dashboard cache. Returns None only if missing (no TTL)."""
+        """Load dashboard cache. Returns None only if missing (no TTL).
+
+        Returns a dict that always has a `last_refreshed_at` key. New
+        caches have it embedded in the JSON payload; legacy caches
+        (built before this field existed) fall back to the SQLite
+        `updated_at` column so the UI can still show a timestamp.
+        """
         cached = self.db.load_dashboard_cache(self.user_id, "dashboard")
         if cached is None:
             return None
-        return cached["data"]
+        data = cached["data"]
+        if "last_refreshed_at" not in data:
+            data["last_refreshed_at"] = cached.get("updated_at")
+        return data
 
     # ----- advice cache -----
 

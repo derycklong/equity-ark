@@ -48,5 +48,27 @@ def get_default_user_email() -> str:
     return os.environ.get("DEFAULT_USER_EMAIL", "")
 
 
+def get_admin_emails() -> list[str]:
+    """List of admin emails (read from `data/.env` like every other var here).
+
+    Accepts either a single value (`ADMIN_EMAILS=you@example.com`) or a
+    comma-separated list (`ADMIN_EMAILS=a@x.com,b@x.com`). Whitespace
+    around each entry is stripped. Returns an empty list if unset.
+
+    For backward compatibility, the legacy single-value `ADMIN_EMAIL` is
+    also accepted (used as a fallback when `ADMIN_EMAILS` is not set).
+    """
+    raw = os.environ.get("ADMIN_EMAILS") or os.environ.get("ADMIN_EMAIL") or ""
+    if not raw:
+        return []
+    return [p.strip().lower() for p in raw.split(",") if p.strip()]
+
+
+def get_admin_email() -> str:
+    """Deprecated single-email shim. Prefer get_admin_emails()."""
+    emails = get_admin_emails()
+    return emails[0] if emails else ""
+
+
 def get_env() -> str:
     return os.environ.get("ENV", "dev")

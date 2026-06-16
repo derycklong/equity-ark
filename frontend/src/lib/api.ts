@@ -1,3 +1,12 @@
+export interface AdminUser {
+  id: string;
+  email: string;
+  name: string;
+  picture: string;
+  created_at: number;
+  last_login_at: number | null;
+}
+
 const base = "";
 
 async function request<T = any>(path: string, init: RequestInit = {}): Promise<T> {
@@ -15,7 +24,8 @@ async function request<T = any>(path: string, init: RequestInit = {}): Promise<T
 
 export const api = {
   health: () => request<{ status: string; users: number; cached_stores: number; llm_enabled: boolean }>("/api/health"),
-  authMe: () => request<{ user: { id: string; email: string; name: string; picture: string } }>("/api/auth/me"),
+  authMe: () => request<{ user: { id: string; email: string; name: string; picture: string; is_admin?: boolean } }>("/api/auth/me"),
+  adminUsers: () => request<{ users: AdminUser[]; admin_emails: string[] }>("/api/admin/users"),
   authGoogleLogin: () => { window.location.href = "/api/auth/google/login"; },
   authLogout: () => request<{ status: string }>("/api/auth/logout", { method: "POST" }),
   summary: () => request<any>("/api/portfolio/summary"),
@@ -104,7 +114,7 @@ export const api = {
       `/api/portfolio/symbols/validate?symbol=${encodeURIComponent(symbol)}&exchange=${encodeURIComponent(exchange)}`,
     ),
   dashboard: () =>
-    request<{ summary: any; breakdown: any; profile: any; holdings: any[]; dividends: any; benchmarks?: any }>("/api/portfolio/dashboard"),
+    request<{ summary: any; breakdown: any; profile: any; holdings: any[]; dividends: any; benchmarks?: any; last_refreshed_at?: number }>("/api/portfolio/dashboard"),
   networthHistory: () =>
     request<{ base_currency: string; history: { date: string; net_worth: number; net_buy_sell: number }[] }>(
       "/api/portfolio/networth-history",

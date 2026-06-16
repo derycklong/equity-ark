@@ -267,6 +267,24 @@ class Database:
             return None
         return {"id": row[0], "email": row[1], "name": row[2] or "", "picture": row[3] or "", "created_at": row[4], "last_login_at": row[5]}
 
+    def list_all_users(self) -> list[dict]:
+        """Return every user, ordered by most-recent login first."""
+        rows = self._conn().execute(
+            "SELECT id, email, name, picture, created_at, last_login_at FROM users "
+            "ORDER BY COALESCE(last_login_at, 0) DESC, created_at DESC",
+        ).fetchall()
+        return [
+            {
+                "id": r[0],
+                "email": r[1],
+                "name": r[2] or "",
+                "picture": r[3] or "",
+                "created_at": r[4],
+                "last_login_at": r[5],
+            }
+            for r in rows
+        ]
+
     def create_session(self, user_id: str, ttl_seconds: int = 60 * 60 * 24 * 30) -> str:
         token = secrets.token_urlsafe(48)
         now = time.time()

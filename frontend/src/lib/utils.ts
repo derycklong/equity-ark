@@ -56,3 +56,24 @@ export function fmtDate(s: string | null | undefined): string {
     return s;
   }
 }
+
+// Returns a human-readable "time ago" string for a unix timestamp in seconds.
+// e.g. "just now", "3m ago", "2h ago", "5d ago", "12/06/2026 09:00"
+export function timeAgo(unixSeconds: number | null | undefined): string {
+  if (!unixSeconds) return "—";
+  const now = Date.now();
+  const then = unixSeconds * 1000;
+  const diffSec = Math.max(0, Math.floor((now - then) / 1000));
+  if (diffSec < 30) return "just now";
+  if (diffSec < 60) return `${diffSec}s ago`;
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDay = Math.floor(diffHr / 24);
+  if (diffDay < 7) return `${diffDay}d ago`;
+  const d = new Date(then);
+  const day = String(d.getDate()).padStart(2, "0");
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  return `${day}/${month}/${d.getFullYear()}`;
+}

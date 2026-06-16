@@ -8,6 +8,9 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const setUser = useStore((s) => s.setUser);
 
+  // Re-fetch /api/auth/me on mount AND on every route change so flags
+  // like `is_admin` (which depend on env config that may change without
+  // a re-login) stay current.
   useEffect(() => {
     api.authMe()
       .then((res) => {
@@ -18,7 +21,7 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
         setUser(null);
         setStatus("unauthed");
       });
-  }, [setUser]);
+  }, [setUser, location.pathname]);
 
   if (status === "loading") {
     return (
