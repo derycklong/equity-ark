@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { fmtMoney, fmtPct, fmtNum, fmtDate, ccySymbol } from "../lib/utils";
-import { ArrowUpRight, ArrowDownRight } from "lucide-react";
+import { ArrowUpRight, ArrowDownRight, ArrowUp, ArrowDown } from "lucide-react";
 import { useHoldings } from "../hooks/usePortfolio";
 import { LoadingScreen } from "../components/LoadingScreen";
 import MobileTable from "../components/MobileTable";
@@ -47,6 +47,8 @@ export default function Holdings() {
   const [filter, setFilter] = useState<string>("");
   const [marketFilter, setMarketFilter] = useState<string>("");
   const [selected, setSelected] = useState<HoldingBase | null>(null);
+  const [sortKey, setSortKey] = useState<string>("mktval");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
   useEffect(() => {
     if (focusSymbol && holdings.length > 0) {
@@ -74,6 +76,52 @@ export default function Holdings() {
     return true;
   });
 
+  const getSortVal = (h: Holding, key: string): number | string => {
+    switch (key) {
+      case "symbol": return h.symbol;
+      case "market": return h.market;
+      case "qty": return h.quantity;
+      case "avgcost": return h.avg_cost;
+      case "price": return h.current_price ?? 0;
+      case "cost": return h.cost_basis;
+      case "mktval": return h.display_mv;
+      case "day": return h.day_change ?? 0;
+      case "unreal": return h.unrealized_pnl ?? 0;
+      case "real": return h.realized_pnl ?? 0;
+      case "divs": return h.dividends_received ?? 0;
+      case "pnl": return h.display_pnl;
+      default: return 0;
+    }
+  };
+
+  const handleSort = (key: string) => {
+    if (sortKey === key) {
+      setSortDir(sortDir === "asc" ? "desc" : "asc");
+    } else {
+      setSortKey(key);
+      setSortDir(key === "symbol" || key === "market" ? "asc" : "desc");
+    }
+  };
+
+  const SortIcon = ({ col }: { col: string }) => {
+    if (sortKey !== col) return null;
+    return sortDir === "asc" 
+      ? <ArrowUp size={12} className="inline ml-1" />
+      : <ArrowDown size={12} className="inline ml-1" />;
+  };
+
+  const sortRows = (rows: Holding[]) => {
+    return [...rows].sort((a, b) => {
+      const av = getSortVal(a, sortKey);
+      const bv = getSortVal(b, sortKey);
+      if (typeof av === "string" && typeof bv === "string") {
+        return sortDir === "asc" ? av.localeCompare(bv) : bv.localeCompare(av);
+      }
+      const diff = (av as number) - (bv as number);
+      return sortDir === "asc" ? diff : -diff;
+    });
+  };
+
   // Group by currency
   const grouped = useMemo(() => {
     const map = new Map<string, Holding[]>();
@@ -83,7 +131,6 @@ export default function Holdings() {
       map.set(h.currency, list);
     }
     return Array.from(map.entries())
-      .sort(([a], [b]) => a.localeCompare(b))
       .map(([ccy, rows]) => {
         const sumMv = rows.reduce((s, r) => s + r.display_mv, 0);
         const sumCost = rows.reduce((s, r) => s + r.cost_basis, 0);
@@ -95,7 +142,8 @@ export default function Holdings() {
         const sumTotalPct = sumCost > 0 ? sumTotal / sumCost : 0;
         const sumDay = rows.reduce((s, r) => s + (r.day_change ?? 0), 0);
         return { ccy, rows, sumMv, sumCost, sumUnreal, sumReal, sumDivs, sumTotal, sumUnrealPct, sumTotalPct, sumDay };
-      });
+      })
+      .sort((a, b) => b.sumMv - a.sumMv);
   }, [enriched]);
 
   const markets = Array.from(new Set(holdings.map((h) => h.market))).sort();
@@ -134,7 +182,7 @@ export default function Holdings() {
             <span className="text-sm text-ink-faint">{rows.length} position{rows.length !== 1 ? "s" : ""}</span>
           </div>
           <MobileTable
-            items={rows}
+            items={sortRows(rows)}
             keyOf={(h) => h.symbol}
             empty={`No ${ccy} positions match the current filters.`}
             renderCard={(h) => (
@@ -195,21 +243,21 @@ export default function Holdings() {
                   </colgroup>
                   <thead className="text-ink-faint text-sm uppercase bg-bg-soft">
                     <tr>
-                      <th className="text-left px-3 sm:px-4 py-2 whitespace-nowrap">Symbol</th>
-                      <th className="text-left px-2 py-2 whitespace-nowrap hidden sm:table-cell">Market</th>
-                      <th className="text-right px-2 py-2 whitespace-nowrap">Qty<br/>Avg cost</th>
-                      <th className="text-right px-2 py-2 whitespace-nowrap">Price</th>
-                      <th className="text-right px-2 py-2 whitespace-nowrap hidden sm:table-cell">Cost basis</th>
-                      <th className="text-right px-2 py-2 whitespace-nowrap">Mkt val</th>
-                      <th className="text-right px-2 py-2 whitespace-nowrap border-l border-line hidden md:table-cell">Day</th>
-                      <th className="text-right px-2 py-2 whitespace-nowrap hidden md:table-cell">Unrealized</th>
-                      <th className="text-right px-2 py-2 whitespace-nowrap hidden md:table-cell">Realized</th>
-                      <th className="text-right px-2 py-2 whitespace-nowrap hidden md:table-cell">Dividends</th>
-                      <th className="text-right px-3 sm:px-4 py-2 whitespace-nowrap border-l border-line">Total P&L</th>
+                      <th className="text-left px-3 sm:px-4 py-2 whitespace-nowrap cursor-pointer hover:text-ink select-none" onClick={() => handleSort("symbol")}>Symbol<SortIcon col="symbol" /></th>
+                      <th className="text-left px-2 py-2 whitespace-nowrap cursor-pointer hover:text-ink select-none hidden sm:table-cell" onClick={() => handleSort("market")}>Market<SortIcon col="market" /></th>
+                      <th className="text-right px-2 py-2 whitespace-nowrap cursor-pointer hover:text-ink select-none" onClick={() => handleSort("qty")}>Qty<br/>Avg cost<SortIcon col="qty" /></th>
+                      <th className="text-right px-2 py-2 whitespace-nowrap cursor-pointer hover:text-ink select-none" onClick={() => handleSort("price")}>Price<SortIcon col="price" /></th>
+                      <th className="text-right px-2 py-2 whitespace-nowrap cursor-pointer hover:text-ink select-none hidden sm:table-cell" onClick={() => handleSort("cost")}>Cost basis<SortIcon col="cost" /></th>
+                      <th className="text-right px-2 py-2 whitespace-nowrap cursor-pointer hover:text-ink select-none" onClick={() => handleSort("mktval")}>Mkt val<SortIcon col="mktval" /></th>
+                      <th className="text-right px-2 py-2 whitespace-nowrap cursor-pointer hover:text-ink select-none border-l border-line hidden md:table-cell" onClick={() => handleSort("day")}>Day<SortIcon col="day" /></th>
+                      <th className="text-right px-2 py-2 whitespace-nowrap cursor-pointer hover:text-ink select-none hidden md:table-cell" onClick={() => handleSort("unreal")}>Unrealized<SortIcon col="unreal" /></th>
+                      <th className="text-right px-2 py-2 whitespace-nowrap cursor-pointer hover:text-ink select-none hidden md:table-cell" onClick={() => handleSort("real")}>Realized<SortIcon col="real" /></th>
+                      <th className="text-right px-2 py-2 whitespace-nowrap cursor-pointer hover:text-ink select-none hidden md:table-cell" onClick={() => handleSort("divs")}>Dividends<SortIcon col="divs" /></th>
+                      <th className="text-right px-3 sm:px-4 py-2 whitespace-nowrap cursor-pointer hover:text-ink select-none border-l border-line" onClick={() => handleSort("pnl")}>Total P&L<SortIcon col="pnl" /></th>
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.map((h) => (
+                    {sortRows(rows).map((h) => (
                       <tr
                         key={h.symbol}
                         onClick={() => setSelected(h)}

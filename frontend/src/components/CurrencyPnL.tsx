@@ -62,7 +62,7 @@ export default function CurrencyPnL() {
 
   const ccy = data.base_currency;
   const valColor = (n: number) => (n > 0 ? "text-good" : n < 0 ? "text-bad" : "text-ink-dim");
-  const maxMv = Math.max(...data.rows.map((r) => r.current_value ?? 0), 1);
+  const maxPct = Math.max(...data.rows.map((r) => r.current_value_pct ?? 0), 1);
 
   return (
     <div className="rounded-lg border border-line bg-bg-card overflow-hidden">
@@ -89,7 +89,7 @@ export default function CurrencyPnL() {
           <tbody>
             {data.rows.map((r) => {
               const mv = r.current_value ?? 0;
-              const mvPct = mv / maxMv;
+              const mvPct = (r.current_value_pct ?? 0) / maxPct;
               const day = r.day_change ?? 0;
               const dayPct = r.day_change_pct ?? 0;
               const unreal = r.current_pnl ?? 0;
