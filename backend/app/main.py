@@ -208,8 +208,11 @@ async def csrf_protect(request: Request, call_next):
         origin = request.headers.get("origin") or ""
         if not origin:
             referer = request.headers.get("referer", "")
-            origin = referer.rsplit("/", 1)[0] if referer else ""
-        if allowed and not any(origin.startswith(o) for o in allowed):
+            # Use scheme+netloc from referer as origin
+            from urllib.parse import urlparse
+            parsed = urlparse(referer)
+            origin = f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else ""
+        if allowed and origin not in allowed:
             logger.warning(
                 "Blocked cross-origin %s %s (origin=%r, allowed=%s)",
                 request.method, request.url.path, origin, allowed,
@@ -277,9 +280,8 @@ if _ENV_FILE.exists():
 _admin_emails = get_admin_emails()
 if _admin_emails:
     logger.info(
-        "Admin enabled for %d email(s): %s (set in data/.env as ADMIN_EMAILS)",
+        "Admin enabled for %d email(s) (set in data/.env as ADMIN_EMAILS)",
         len(_admin_emails),
-        ", ".join(_admin_emails),
     )
     if os.environ.get("ADMIN_EMAILS"):
         # Both could be set; if only the new name is used, no warning.
@@ -301,8 +303,10 @@ if not os.environ.get("SESSION_SECRET"):
 
 _serializer = URLSafeSerializer(SESSION_SECRET, salt="vibe-session")
 
-# CORS — refuse wildcard in prod, lock down methods/headers.
+# CORS — refuse wildcard when credentials are enabled, lock down methods/headers.
 cors_origins = [o.strip() for o in os.environ.get("CORS_ORIGINS", "http://localhost:5173").split(",") if o.strip()]
+if "*" in cors_origins:
+    raise RuntimeError("CORS_ORIGINS cannot contain '*' when allow_credentials=True. Refusing to start.")
 if not cors_origins and os.environ.get("ENV") == "prod":
     raise RuntimeError("CORS_ORIGINS must be set in production. Refusing to start with wildcard CORS.")
 app.add_middleware(
@@ -412,6 +416,8 @@ async def auth_google_callback(request: Request, response: Response):
     email = userinfo.get("email")
     if not email:
         return RedirectResponse(url=f"{FRONTEND_URL}/login?error=no_email")
+    if not userinfo.get("email_verified"):
+        return RedirectResponse(url=f"{FRONTEND_URL}/login?error=email_not_verified")
     name = userinfo.get("name", "")
     picture = userinfo.get("picture", "")
     user = request.app.state.store_manager.db.upsert_user(email, name, picture)
@@ -700,6 +706,11 @@ def delete_fund_alias(alias: str, store: PortfolioStore = Depends(get_user_store
 async def portfolio_upload(request: Request, file: UploadFile = File(...),
                             store: PortfolioStore = Depends(get_user_store)) -> dict:
     MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
+    # Validate Content-Type
+    content_type = (file.content_type or "").lower()
+    allowed_types = {"text/csv", "text/plain", "application/vnd.ms-excel", "application/octet-stream"}
+    if content_type and content_type not in allowed_types:
+        raise HTTPException(415, f"Unsupported file type: {content_type}. Please upload a CSV file.")
     cl = request.headers.get("content-length")
     if cl and cl.isdigit() and int(cl) > MAX_UPLOAD_BYTES:
         raise HTTPException(413, f"File too large (max {MAX_UPLOAD_BYTES // (1024*1024)} MB)")
