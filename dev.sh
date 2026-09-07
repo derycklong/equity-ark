@@ -11,6 +11,9 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 export ENV=dev
 export OAUTH_REDIRECT_URI="http://localhost:8765/api/auth/google/callback"
 export FRONTEND_URL="http://localhost:5173"
+# LAN access: both servers bind to 0.0.0.0 (see below) so any device on the
+# same network can reach the dev frontend. If you visit from a LAN device,
+# add its origin (e.g. http://192.168.1.42:5173) to CORS_ORIGINS too.
 export CORS_ORIGINS="http://localhost:5173,http://127.0.0.1:5173"
 
 cleanup() {
@@ -56,16 +59,21 @@ for port in 8765 5173; do
 done
 sleep 0.5
 
-echo ">>> starting backend on :8765"
-(cd "$ROOT/backend" && "$PYTHON" -m uvicorn app.main:app --host "$HOST" --port 8765 --reload) &
+echo ">>> starting backend on :8765 (binding 0.0.0.0 for LAN access)"
+(cd "$ROOT/backend" && "$PYTHON" -m uvicorn app.main:app --host 0.0.0.0 --port 8765 --reload) &
 BACKEND_PID=$!
 
-echo ">>> starting frontend on :5173"
-(cd "$ROOT/frontend" && npx vite --host "$HOST" --port 5173) &
+echo ">>> starting frontend on :5173 (vite.config.ts: host:true for LAN access)"
+(cd "$ROOT/frontend" && npx vite --port 5173) &
 FRONTEND_PID=$!
 
 echo
-echo "Backend  http://$HOST:8765  (docs at /docs)"
-echo "Frontend http://$HOST:5173"
+echo "Local    Backend  http://$HOST:8765  (docs at /docs)"
+echo "Local    Frontend http://$HOST:5173"
+# Print the LAN IP so phones / other devices on the same network can connect.
+LAN_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+if [ -n "$LAN_IP" ]; then
+  echo "LAN      Frontend http://$LAN_IP:5173   (add http://$LAN_IP:5173 to CORS_ORIGINS)"
+fi
 echo
 wait

@@ -1423,8 +1423,11 @@ class PortfolioStore:
 
         Uses a single batched yfinance call (`yf.download`) for all symbols +
         FX pairs — 1 HTTP request total. Results are cached in memory for 24h
-        since monthly closes rarely change and the current month's close
-        updates daily.
+        since monthly closes rarely change.
+
+        Every chart point uses the historical monthly close for the date shown
+        on the x-axis (even the latest/partial month), so historical values do
+        not drift with live price movements or intraday refreshes.
 
         Falls back to a cumulative-cost-basis series (no market data) if
         yfinance returns no data.
@@ -1450,10 +1453,11 @@ class PortfolioStore:
                 sym = t.symbol.upper()
                 if sym not in symbol_info:
                     res = resolve_symbol(t.symbol, t.exchange)
+                    yf_sym = res.yahoo_symbol or sym
                     symbol_info[sym] = {
                         "currency": t.currency,
-                        "yahoo_symbol": res.yahoo_symbol,
-                        "has_price": bool(res.yahoo_symbol) and res.market not in {"cash", "sg_bond", "fund", "other"},
+                        "yahoo_symbol": yf_sym,
+                        "has_price": bool(yf_sym) and res.market not in {"cash", "sg_bond", "other"},
                     }
 
             yahoo_symbols = sorted({info["yahoo_symbol"] for info in symbol_info.values() if info["yahoo_symbol"]})
@@ -1493,7 +1497,13 @@ class PortfolioStore:
             today = date.today()
 
             if not close_df.empty:
-                month_ends = sorted({d.date() for d in close_df.index})
+                # yfinance's interval="1mo" returns one row per month (indexed on
+                # day 1) PLUS a row for "today" when the request includes the
+                # current partial month — so close_df.index can hold both
+                # 2026-06-01 and 2026-06-22. Keep only the month-start rows so
+                # we get one chart point per month.
+                raw_dates = {d.date() for d in close_df.index}
+                month_ends = sorted(d for d in raw_dates if d.day == 1)
             else:
                 first_tx = min(t.date for t in self.transactions)
                 start = max(date(today.year - 1, today.month, 1), first_tx.replace(day=1))
@@ -1576,7 +1586,6 @@ class PortfolioStore:
 
                 nw = 0.0
                 have_market_data = not close_df.empty
-                is_current_month = (d.year, d.month) == (today.year, today.month)
 
                 if have_market_data:
                     mask = close_df.index.date <= d
@@ -1586,14 +1595,6 @@ class PortfolioStore:
                         info = symbol_info[sym]
                         ccy = info["currency"]
                         if info["has_price"]:
-                            if is_current_month:
-                                price_info = self._prices.get(sym, {})
-                                cur_px = price_info.get("price")
-                                if cur_px is not None and not (isinstance(cur_px, float) and math.isnan(cur_px)):
-                                    price = float(cur_px)
-                                    rate = 1.0 if ccy == base_currency else self.fx.get(ccy, base_currency)
-                                    nw += qty * price * rate
-                                    continue
                             ysym = info["yahoo_symbol"]
                             if ysym not in close_df.columns or not mask.any():
                                 continue
@@ -1613,9 +1614,7 @@ class PortfolioStore:
                             nw += qty * price * rate
                         else:
                             cost = cum_cost.get(sym, 0.0)
-                            rate = 1.0 if ccy == base_currency else (
-                                self.fx.get(ccy, base_currency) if is_current_month
-                                else self.fx.get_historical_rate(ccy, base_currency, d.isoformat()))
+                            rate = 1.0 if ccy == base_currency else self.fx.get_historical_rate(ccy, base_currency, d.isoformat())
                             nw += cost * rate
                 else:
                     for t in txs_sorted:

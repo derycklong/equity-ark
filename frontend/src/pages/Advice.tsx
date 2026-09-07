@@ -6,28 +6,36 @@ import remarkGfm from "remark-gfm";
 import { Sparkles, AlertTriangle, Lightbulb, Send, Loader2, X, RefreshCw, Brain, ChevronDown, ChevronUp } from "lucide-react";
 import { fmtMoney, fmtPct, fmtNum } from "../lib/utils";
 import { useDashboard } from "../hooks/usePortfolio";
-
-interface AdviceReport {
-  generated_at: string;
-  summary: string;
-  sections: { title: string; items: string[] }[];
-  risk_flags: string[];
-  opportunities: string[];
-  raw_markdown: string;
-  source: "rule-based" | "llm";
-  question?: string; // populated when the report was a custom-question answer
-}
+import { useAdviceStreamStore, type AdviceReport } from "../stores/adviceStream";
+import { useStore } from "../stores/useStore";
 
 const ADVICE_KEY = ["advice", "full"] as const;
-const ADVICE_LS_KEY = "equity-ark-advice-cache-v1";
+// localStorage keys are namespaced by user_id so two users on the same
+// browser don't see each other's cached reports.
+function lsKey(userId: string | undefined, suffix: string): string {
+  return `equity-ark-advice-cache-v1:${userId ?? "anon"}:${suffix}`;
+}
 
-function readPersistedReport(): AdviceReport | undefined {
+// Old, non-namespaced keys from previous versions — these would let any
+// logged-in user see whoever's report was last cached on this browser.
+// Delete them on first load so they can't leak.
+const LEGACY_LS_KEYS = [
+  "equity-ark-advice-cache-v1",
+  "equity-ark-advice-cache-v1:q",
+  "equity-ark-advice-cache-v1:qt",
+];
+if (typeof window !== "undefined") {
+  try {
+    for (const k of LEGACY_LS_KEYS) localStorage.removeItem(k);
+  } catch { /* ignore */ }
+}
+
+function readPersistedReport(userId: string | undefined): AdviceReport | undefined {
   if (typeof window === "undefined") return undefined;
   try {
-    const raw = localStorage.getItem(ADVICE_LS_KEY);
+    const raw = localStorage.getItem(lsKey(userId, "default"));
     if (!raw) return undefined;
     const parsed = JSON.parse(raw) as AdviceReport;
-    // Only restore if it's recent enough (24 h) — old reports are stale.
     if (!parsed.generated_at) return undefined;
     const age = Date.now() - new Date(parsed.generated_at).getTime();
     if (age > 24 * 60 * 60 * 1000) return undefined;
@@ -37,34 +45,57 @@ function readPersistedReport(): AdviceReport | undefined {
   }
 }
 
-function writePersistedReport(r: AdviceReport) {
+function writePersistedReport(userId: string | undefined, r: AdviceReport) {
   if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(ADVICE_LS_KEY, JSON.stringify(r));
+    localStorage.setItem(lsKey(userId, "default"), JSON.stringify(r));
   } catch {
     /* quota exceeded etc. — ignore */
   }
+}
+
+/**
+ * Strip an outer ```markdown ... ``` (or ``` ... ```) fence from the LLM's
+ * response. Sometimes the model wraps its entire reply in a fenced code
+ * block, which would otherwise render as one giant <pre><code> with the
+ * markdown syntax visible instead of parsed.
+ *
+ * Handles:
+ *   ```markdown\n...\n```
+ *   ```\n...\n```
+ *   ```md\n...\n```
+ * Leaves anything that isn't a single outer fence untouched.
+ */
+function stripOuterCodeFence(md: string): string {
+  if (!md) return md;
+  // Match a single opening ```<lang>? and a matching closing ``` at the very end.
+  const m = md.match(/^\s*```(?:markdown|md|mdx|text)?\s*\n([\s\S]*?)\n```\s*$/);
+  if (m) return m[1];
+  return md;
 }
 
 
 export default function Advice() {
   const [question, setQuestion] = useState("");
   const [askBusy, setAskBusy] = useState(false);
-  const [error, setError] = useState<string>("");
-  // Live streaming state — overlays the cached report as the LLM generates.
-  const [streaming, setStreaming] = useState(false);
-  const [streamThinking, setStreamThinking] = useState("");
-  const [streamContent, setStreamContent] = useState("");
-  const [streamSource, setStreamSource] = useState<"llm" | "rule-based" | null>(null);
   const [thinkingOpen, setThinkingOpen] = useState(true);
   const askRef = useRef<HTMLTextAreaElement>(null);
   const thinkingScrollRef = useRef<HTMLDivElement>(null);
   const qc = useQueryClient();
+  const userId = useStore((s) => s.user?.id);
 
-  // The current question (empty = the default "full review" report).
-  const [activeQuestion, setActiveQuestion] = useState<string>("");
-  // Question being streamed right now (used to label the AI thinking panel).
-  const [streamingQuestion, setStreamingQuestion] = useState<string | null>(null);
+  // All streaming state lives in the singleton — survives navigation.
+  const streaming = useAdviceStreamStore((s) => s.streaming);
+  const streamThinking = useAdviceStreamStore((s) => s.thinking);
+  const streamContent = useAdviceStreamStore((s) => s.content);
+  const streamSource = useAdviceStreamStore((s) => s.source);
+  const streamingQuestion = useAdviceStreamStore((s) => s.question);
+  const streamError = useAdviceStreamStore((s) => s.error);
+  const lastReport = useAdviceStreamStore((s) => s.lastReport);
+  const streamVersion = useAdviceStreamStore((s) => s.version);
+  const startStream = useAdviceStreamStore((s) => s.start);
+  const stopStream = useAdviceStreamStore((s) => s.stop);
+  const setActiveQuestion = useAdviceStreamStore((s) => s.setActiveQuestion);
 
   const {
     data: report,
@@ -75,9 +106,7 @@ export default function Advice() {
     staleTime: 10 * 60 * 1000,
     refetchOnWindowFocus: false,
     retry: 1,
-    // Seed from localStorage so the user sees the last cached report
-    // immediately on page load — no spinner if we have anything fresh.
-    initialData: readPersistedReport,
+    initialData: () => readPersistedReport(userId),
   });
 
   // The answer to the active question (if any). Persisted to localStorage
@@ -85,7 +114,7 @@ export default function Advice() {
   const [questionAnswer, setQuestionAnswer] = useState<AdviceReport | null>(() => {
     if (typeof window === "undefined") return null;
     try {
-      const raw = localStorage.getItem(ADVICE_LS_KEY + ":q");
+      const raw = localStorage.getItem(lsKey(userId, "q"));
       if (!raw) return null;
       const parsed = JSON.parse(raw) as AdviceReport;
       const age = Date.now() - new Date(parsed.generated_at).getTime();
@@ -94,27 +123,54 @@ export default function Advice() {
   });
   const [activeQuestionText, setActiveQuestionText] = useState<string>(() => {
     if (typeof window === "undefined") return "";
-    try { return localStorage.getItem(ADVICE_LS_KEY + ":qt") || ""; } catch { return ""; }
+    try { return localStorage.getItem(lsKey(userId, "qt")) || ""; } catch { return ""; }
   });
 
-  // Persist to localStorage whenever the report changes.
+  // When the user changes (login/logout/switch account), drop the local
+  // state AND the React Query cache so the new user starts fresh —
+  // the per-user backend cache will repopulate on the next fetch.
   useEffect(() => {
-    if (report && !report.question) writePersistedReport(report);
-  }, [report]);
+    setQuestionAnswer(null);
+    setActiveQuestionText("");
+    setQuestion("");
+    qc.removeQueries({ queryKey: ADVICE_KEY });
+  }, [userId, qc]);
+
+  // Persist default report to localStorage whenever it changes.
+  useEffect(() => {
+    if (report && !report.question) writePersistedReport(userId, report);
+  }, [report, userId]);
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
-      if (questionAnswer) localStorage.setItem(ADVICE_LS_KEY + ":q", JSON.stringify(questionAnswer));
-      else localStorage.removeItem(ADVICE_LS_KEY + ":q");
+      if (questionAnswer) localStorage.setItem(lsKey(userId, "q"), JSON.stringify(questionAnswer));
+      else localStorage.removeItem(lsKey(userId, "q"));
     } catch {}
-  }, [questionAnswer]);
+  }, [questionAnswer, userId]);
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
-      if (activeQuestionText) localStorage.setItem(ADVICE_LS_KEY + ":qt", activeQuestionText);
-      else localStorage.removeItem(ADVICE_LS_KEY + ":qt");
+      if (activeQuestionText) localStorage.setItem(lsKey(userId, "qt"), activeQuestionText);
+      else localStorage.removeItem(lsKey(userId, "qt"));
     } catch {}
-  }, [activeQuestionText]);
+  }, [activeQuestionText, userId]);
+
+  // When a stream finishes, commit its report to the appropriate slot.
+  // Runs only on the Advice page (it's effect-scoped). If the user is on
+  // another page, the singleton has already received the final report; this
+  // effect just catches up when they navigate back.
+  useEffect(() => {
+    if (streaming) return;
+    if (!lastReport) return;
+    if (lastReport.question) {
+      setQuestionAnswer(lastReport);
+      setActiveQuestionText(lastReport.question);
+      setActiveQuestion(lastReport.question);
+    } else {
+      qc.setQueryData(ADVICE_KEY, lastReport);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [streaming, lastReport?.generated_at]);
 
   const { data: dashData } = useDashboard();
   const m = dashData?.summary as any;
@@ -131,126 +187,49 @@ export default function Advice() {
 
   // On first mount: if we don't already have a cached report and the React
   // Query fetch hasn't returned within a short grace period, kick off the
-  // streaming flow so the user sees the "AI thinking" panel immediately
-  // instead of a generic spinner.
+  // streaming flow so the user sees the "AI thinking" panel immediately.
+  // (Skips auto-start if there's already an active stream — e.g. the user
+  // navigated away and back while the AI was still thinking.)
   useEffect(() => {
     if (report) return;
     const cached = qc.getQueryData<AdviceReport>(ADVICE_KEY);
     if (cached) return;
     const t = setTimeout(() => {
-      if (!report && !streaming && !askBusy) {
-        setStreamThinking("");
-        setStreamContent("");
-        setStreamSource(null);
-        setStreaming(true);
-        setThinkingOpen(true);
-        streamAdvice(undefined).catch((e) => {
-          setError(e?.message || "Failed to start stream");
-          setStreaming(false);
-        });
+      const s = useAdviceStreamStore.getState();
+      if (!report && !s.streaming && !s.lastReport && !askBusy) {
+        startStream(undefined).catch(() => { /* error surfaced via store */ });
       }
-    }, 400); // tiny grace period — React Query might have it in 200ms
+    }, 400);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Manual regenerate — streams the response so the user can watch the LLM think.
   async function regenerate() {
-    setError("");
-    setStreamThinking("");
-    setStreamContent("");
-    setStreamSource(null);
-    setStreamingQuestion(null);
-    // Clearing the question makes the display fall back to the default report.
+    setActiveQuestionText("");
     setActiveQuestion("");
     setQuestionAnswer(null);
-    setStreaming(true);
-    setThinkingOpen(true);
     try {
-      await streamAdvice(undefined);
-    } catch (e: any) {
-      setError(e.message || "Failed to generate report");
-      setStreaming(false);
-    }
+      await startStream(undefined);
+    } catch { /* error surfaced via store */ }
   }
 
-  // Ask a custom question — separate cache slot, so the "default" report is preserved.
   async function ask(q: string) {
     if (!q.trim()) return;
     setAskBusy(true);
-    setError("");
-    setStreamThinking("");
-    setStreamContent("");
-    setStreamSource(null);
-    setStreamingQuestion(q);
-    setActiveQuestion(q);
-    setStreaming(true);
-    setThinkingOpen(true);
     try {
-      await streamAdvice(q);
-    } catch (e: any) {
-      setError(e.message || "Failed to ask question");
+      await startStream(q);
     } finally {
       setAskBusy(false);
     }
   }
 
-  // Clear the active question and revert to the default report view.
   function clearQuestion() {
     setActiveQuestion("");
-    setQuestionAnswer(null);
     setActiveQuestionText("");
-    setError("");
+    setQuestionAnswer(null);
   }
 
-  // Streams the LLM response. Updates the UI incrementally, then commits
-  // the final report to the React Query cache. Uses an AbortController
-  // so navigating away cancels the in-flight request.
-  const streamAbortRef = useRef<AbortController | null>(null);
-  useEffect(() => {
-    return () => { streamAbortRef.current?.abort(); };
-  }, []);
-
-  // Throttle state updates so 6500+ rapid reasoning deltas don't kill React.
-  // The accumulator ref holds the live text; the state is flushed at most
-  // every ~80ms (or every ~2 KB), whichever comes first.
-  const thinkingBufRef = useRef({ text: "", dirty: false, lastFlush: 0 });
-  const contentBufRef = useRef({ text: "", dirty: false, lastFlush: 0 });
-
-  // Continuously run while `streaming` is true. Important: keep the loop
-  // alive even when there's no dirty data, so new events arriving between
-  // frames still get flushed. (The previous version stopped the loop on the
-  // first idle frame, which meant anything flushed *after* that never made
-  // it to the DOM.)
-  useEffect(() => {
-    if (!streaming) return;
-    let raf: number | null = null;
-    let stopped = false;
-    const tick = () => {
-      if (stopped) return;
-      const now = performance.now();
-      if (thinkingBufRef.current.dirty && now - thinkingBufRef.current.lastFlush > 80) {
-        setStreamThinking(thinkingBufRef.current.text);
-        thinkingBufRef.current.dirty = false;
-        thinkingBufRef.current.lastFlush = now;
-      }
-      if (contentBufRef.current.dirty && now - contentBufRef.current.lastFlush > 80) {
-        setStreamContent(contentBufRef.current.text);
-        contentBufRef.current.dirty = false;
-        contentBufRef.current.lastFlush = now;
-      }
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => {
-      stopped = true;
-      if (raf !== null) cancelAnimationFrame(raf);
-    };
-  }, [streaming]);
-
   // Auto-scroll the thinking panel to the bottom as content streams in.
-  // Uses a "user scrolled up" detector so we don't fight the user when
-  // they scroll back to read earlier text.
   const userScrolledUpRef = useRef(false);
   useEffect(() => {
     const el = thinkingScrollRef.current;
@@ -267,96 +246,7 @@ export default function Advice() {
     if (!el) return;
     if (userScrolledUpRef.current) return;
     el.scrollTop = el.scrollHeight;
-  }, [streamThinking, thinkingOpen, streaming]);
-
-  async function streamAdvice(customQ?: string) {
-    streamAbortRef.current?.abort();
-    const ctrl = new AbortController();
-    streamAbortRef.current = ctrl;
-
-    // Reset buffers
-    thinkingBufRef.current = { text: "", dirty: false, lastFlush: 0 };
-    contentBufRef.current = { text: "", dirty: false, lastFlush: 0 };
-
-    const res = await fetch("/api/portfolio/advice/stream", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ focus: "full", custom_question: customQ, refresh: true }),
-      signal: ctrl.signal,
-    });
-    if (!res.ok || !res.body) {
-      throw new Error(`stream ${res.status}: ${await res.text()}`);
-    }
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buf = "";
-    let finalReport: AdviceReport | null = null;
-    let fallbackError: string | null = null;
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
-      // SSE: events are separated by blank lines.
-      let idx;
-      while ((idx = buf.indexOf("\n\n")) !== -1) {
-        const block = buf.slice(0, idx);
-        buf = buf.slice(idx + 2);
-        const ev = parseSse(block);
-        if (!ev) continue;
-        if (ev.event === "thinking") {
-          const chunk = ev.data.content || "";
-          thinkingBufRef.current.text += chunk;
-          thinkingBufRef.current.dirty = true;
-        } else if (ev.event === "content") {
-          const chunk = ev.data.content || "";
-          contentBufRef.current.text += chunk;
-          contentBufRef.current.dirty = true;
-        } else if (ev.event === "report") {
-          finalReport = ev.data.report;
-          if (ev.data.thinking) {
-            thinkingBufRef.current.text += ev.data.thinking;
-            thinkingBufRef.current.dirty = true;
-          }
-          if (ev.data.error) {
-            fallbackError = ev.data.error;
-          }
-        } else if (ev.event === "error") {
-          throw new Error(ev.data.message || "stream error");
-        }
-      }
-    }
-    // Final flush — guarantees the final chunks are visible.
-    if (thinkingBufRef.current.dirty) setStreamThinking(thinkingBufRef.current.text);
-    if (contentBufRef.current.dirty) setStreamContent(contentBufRef.current.text);
-
-    if (finalReport) {
-      const tagged = customQ ? { ...finalReport, question: customQ } : finalReport;
-      setStreamSource(tagged.source);
-      if (customQ) {
-        // Question answer — keep in its own slot, persisted to localStorage.
-        setQuestionAnswer(tagged);
-        setActiveQuestionText(customQ);
-        setActiveQuestion(customQ);
-      } else {
-        // Default report — update the React Query cache + localStorage.
-        qc.setQueryData(ADVICE_KEY, tagged);
-      }
-      if (fallbackError) {
-        setError("AI advisor is temporarily unavailable — showing the last AI report.");
-      }
-    }
-    setStreaming(false);
-  }
-
-  // Clean up the streaming overlay when the cached report is loaded.
-  useEffect(() => {
-    if (!streaming) {
-      setStreamThinking("");
-      setStreamContent("");
-      setStreamSource(null);
-    }
-  }, [streaming]);
+  }, [streamThinking, thinkingOpen, streaming, streamVersion]);
 
   // What to show in the report body: live stream > question answer > default report.
   const baseReport: AdviceReport | null = questionAnswer ?? report ?? null;
@@ -381,6 +271,12 @@ export default function Advice() {
           <h1 className="text-xl font-semibold flex items-center gap-2">
             <Sparkles size={20} className="text-accent" />
             AI Advisor
+            {streaming && (
+              <span className="inline-flex items-center gap-1.5 text-xs font-normal text-info">
+                <Loader2 size={12} className="animate-spin" />
+                thinking…
+              </span>
+            )}
           </h1>
           <p className="text-ink-dim text-sm mt-0.5">
             Grounded analysis from your live holdings, transactions, and dividend cash flows.
@@ -388,10 +284,10 @@ export default function Advice() {
         </div>
         {displayReport && (
           <div className="flex items-center gap-2 text-xs flex-wrap">
-            {activeQuestion && !streaming && (
+            {activeQuestionText && !streaming && (
               <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 bg-info/10 text-info">
                 <Brain size={11} />
-                <span className="max-w-[40ch] truncate">Q: {activeQuestion}</span>
+                <span className="max-w-[40ch] truncate">Q: {activeQuestionText}</span>
                 <button
                   onClick={clearQuestion}
                   title="Back to default report"
@@ -422,9 +318,12 @@ export default function Advice() {
         )}
       </div>
 
-      {/* === Compact metrics bar === */}
+      {/* === Compact metrics bar ===
+          Hidden entirely on mobile — the page already has the question
+          input and the report below, and the dashboard itself has the same
+          metrics in a friendlier layout. */}
       {metrics && (
-        <div className="rounded-lg border border-line bg-bg-card px-3 py-2 flex items-center gap-4 overflow-x-auto text-sm">
+        <div className="hidden sm:flex rounded-lg border border-line bg-bg-card px-3 py-2 items-center gap-4 overflow-x-auto text-sm">
           <Stat label="Net worth" value={fmtMoney(metrics.netWorth, "SGD")} />
           <Sep />
           <Stat label="Capital" value={fmtMoney(metrics.capital, "SGD")} />
@@ -483,14 +382,13 @@ export default function Advice() {
         </div>
       </form>
 
-      {error && (
+      {streamError && (
         <div className="rounded-md border border-bad bg-bad/10 text-bad px-3 py-2 text-sm">
-          {error}
+          {streamError}
         </div>
       )}
 
-      {/* === Initial-load: show a "Generate" CTA when nothing's loaded yet.
-              The streaming panel below handles the in-progress state. === */}
+      {/* === Initial-load CTA === */}
       {loading && !displayReport && !streaming && (
         <div className="rounded-xl border border-line bg-bg-card p-8 text-center space-y-3">
           <Sparkles size={28} className="text-accent mx-auto" />
@@ -501,17 +399,7 @@ export default function Advice() {
             </div>
           </div>
           <button
-            onClick={() => {
-              setStreamThinking("");
-              setStreamContent("");
-              setStreamSource(null);
-              setStreaming(true);
-              setThinkingOpen(true);
-              streamAdvice(undefined).catch((e) => {
-                setError(e?.message || "Failed to generate");
-                setStreaming(false);
-              });
-            }}
+            onClick={() => startStream(undefined).catch(() => {})}
             className="inline-flex items-center gap-1.5 rounded-lg bg-accent text-bg px-4 py-2 text-sm font-semibold hover:opacity-90 transition-opacity shadow-sm"
           >
             <Sparkles size={14} />
@@ -520,7 +408,7 @@ export default function Advice() {
         </div>
       )}
 
-      {/* === Live streaming thinking block — shows as soon as streaming starts === */}
+      {/* === Live streaming thinking block === */}
       {streaming && (
         <div className="rounded-xl border border-info/40 bg-info/5 overflow-hidden">
           <button
@@ -609,7 +497,9 @@ export default function Advice() {
               prose-code:text-accent prose-code:bg-bg-soft prose-code:px-1 prose-code:rounded
             ">
               {displayReport.raw_markdown ? (
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayReport.raw_markdown}</ReactMarkdown>
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {stripOuterCodeFence(displayReport.raw_markdown)}
+                </ReactMarkdown>
               ) : (
                 <span className="italic text-ink-faint">…waiting for content…</span>
               )}
@@ -624,17 +514,6 @@ export default function Advice() {
       )}
     </div>
   );
-}
-
-function parseSse(block: string): { event: string; data: any } | null {
-  let event = "message";
-  let data = "";
-  for (const line of block.split("\n")) {
-    if (line.startsWith("event:")) event = line.slice(6).trim();
-    else if (line.startsWith("data:")) data += (data ? "\n" : "") + line.slice(5).trim();
-  }
-  if (!data) return null;
-  try { return { event, data: JSON.parse(data) }; } catch { return null; }
 }
 
 function Stat({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: "good" | "bad" }) {

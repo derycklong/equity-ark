@@ -66,7 +66,11 @@ export default function ToolbarOverflow({
               <MoreHorizontal size={16} />
             </button>
             {open && (
-              <div className="absolute right-0 top-full mt-1 z-30 min-w-[180px] rounded-lg border border-line bg-bg-card shadow-lg py-1">
+              // Anchor the dropdown to the LEFT edge of the ⋯ button so it
+              // opens to the RIGHT and stays inside the viewport when the
+              // toolbar is left-aligned (the common mobile layout). Cap the
+              // width so it never overflows the right edge either.
+              <div className="absolute left-0 top-full mt-1 z-30 min-w-[180px] max-w-[calc(100vw-1rem)] rounded-lg border border-line bg-bg-card shadow-lg py-1">
                 <div className="flex flex-col" onClick={() => setOpen(false)}>
                   {secondary}
                 </div>

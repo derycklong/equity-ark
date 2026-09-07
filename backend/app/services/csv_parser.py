@@ -62,7 +62,7 @@ def resolve_symbol(symbol: str, exchange: str) -> SymbolResolution:
         return SymbolResolution(market="cash", yahoo_symbol=raw)
 
     # SSB Singapore Savings Bonds
-    if ex == "SSB" or raw.startswith("GX") or raw.startswith("IN"):
+    if ex == "SSB" or raw.startswith("GX"):
         return SymbolResolution(market="sg_bond", yahoo_symbol=raw, display_name=raw)
 
     # Mutual funds — no yfinance symbol, tracked manually

@@ -281,7 +281,11 @@ export default function Dividends() {
         {/* LEFT — All dividend transactions */}
         <div className="rounded-lg border border-line bg-bg-card overflow-hidden lg:row-span-1 flex flex-col">
           <div className="px-3 py-2 border-b border-line flex items-center justify-between gap-2 bg-bg-soft shrink-0">
-            <h2 className="text-sm font-medium shrink-0 flex items-center gap-1.5">
+            {/* Section title is redundant on mobile (the page header already
+                says "Dividends"); only show it when we're in the 2-column
+                desktop layout. The currency filter chips stay visible on
+                both layouts. */}
+            <h2 className="hidden lg:flex text-sm font-medium shrink-0 items-center gap-1.5">
               <ListChecks size={13} className="text-warn" />
               All dividend transactions
             </h2>

@@ -16,6 +16,20 @@ export function fmtMoney(n: number | null | undefined, ccy = "USD"): string {
   return `${sign}${formatted} ${ccy}`;
 }
 
+/**
+ * Like fmtMoney but rounds up (towards +∞) and shows zero decimal places.
+ * Useful for compact card layouts where showing "7,171,190 SGD" is more
+ * readable than "7,171,190.00 SGD". Negative values round toward zero
+ * (e.g. -100.4 → -100, never -101).
+ */
+export function fmtMoneyCeil(n: number | null | undefined, ccy = "USD"): string {
+  if (n === null || n === undefined || Number.isNaN(n)) return "—";
+  const sign = n < 0 ? "-" : "";
+  const ceiled = Math.ceil(Math.abs(n));
+  const formatted = ceiled.toLocaleString("en-US");
+  return `${sign}${formatted} ${ccy}`;
+}
+
 const _CCY_SYMBOL: Record<string, string> = {
   USD: "$", SGD: "S$", HKD: "HK$", GBP: "£", CNY: "¥", JPY: "¥", EUR: "€", AUD: "A$", CAD: "C$"
 };

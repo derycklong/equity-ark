@@ -25,11 +25,17 @@ export default function NetWorthChart({ ccy }: NetWorthChartProps) {
   });
   const data = networthData?.history || [];
   const error = queryError ? (queryError instanceof Error ? queryError.message : String(queryError)) : null;
-  // Track whether we're on a narrow viewport so the x-axis can show a
-  // short month label on mobile and the full date on desktop.
-  const [isNarrow, setIsNarrow] = useState<boolean>(() =>
-    typeof window !== "undefined" ? window.innerWidth < 640 : false,
-  );
+  // Track viewport width so the x-axis label format adapts:
+  //   <640px  → "Jul" (short month, rotated)
+  //   <1024px → "25-07" (year-month, rotated)
+  //   else    → "2025-07-26" (full date, horizontal)
+  const getWidthBucket = () => {
+    if (typeof window === "undefined") return "wide";
+    if (window.innerWidth < 640) return "narrow";
+    if (window.innerWidth < 1024) return "medium";
+    return "wide";
+  };
+  const [widthBucket, setWidthBucket] = useState<string>(getWidthBucket);
   // Track colors in state so they update AFTER the DOM class flip from
   // ThemeProvider's useEffect has been applied.
   const [colors, setColors] = useState(() => ({
@@ -64,11 +70,9 @@ export default function NetWorthChart({ ccy }: NetWorthChartProps) {
     return () => observer.disconnect();
   }, [theme]);
 
-  // Track viewport width so the x-axis label switches between
-  // a short month (mobile) and the full date (desktop).
+  // Track viewport width so the x-axis label format adapts.
   useEffect(() => {
-    const onResize = () => setIsNarrow(window.innerWidth < 640);
-    onResize();
+    const onResize = () => setWidthBucket(getWidthBucket());
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
@@ -106,26 +110,32 @@ export default function NetWorthChart({ ccy }: NetWorthChartProps) {
       legend: {
         show: false,
       },
-      grid: { left: "3%", right: "4%", bottom: 30, top: 16, containLabel: true },
+      grid: { left: "3%", right: "4%", bottom: widthBucket === "wide" ? 30 : 50, top: 16, containLabel: true },
       xAxis: {
         type: "category",
         data: dates,
         axisLine: { lineStyle: { color: gridColor } },
         axisLabel: {
           color: textColor,
+          // Rotate labels on smaller viewports so they don't squash together.
+          rotate: widthBucket === "wide" ? 0 : 35,
+          // Always hide overlapping labels as a final safety net — ECharts
+          // measures bounding boxes and skips any that would collide.
+          hideOverlap: true,
           formatter: (value: string) => {
-            // value is "YYYY-MM-DD"; show short month on narrow viewports.
-            if (isNarrow) {
-              const [, m] = value.split("-");
+            // value is "YYYY-MM-DD"
+            const [y, m] = value.split("-");
+            if (widthBucket === "narrow") {
               const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
                                   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
               const idx = parseInt(m, 10) - 1;
               return monthNames[idx] ?? value;
             }
+            if (widthBucket === "medium") {
+              return `${y.slice(2)}-${m}`;
+            }
             return value;
           },
-          // Hide every other label on narrow so they don't collide.
-          interval: isNarrow ? "auto" : 0,
         },
       },
       yAxis: [
@@ -179,7 +189,7 @@ export default function NetWorthChart({ ccy }: NetWorthChartProps) {
         },
       ],
     };
-  }, [data, ccy, colors, isNarrow]);
+  }, [data, ccy, colors, widthBucket]);
 
   useEffect(() => {
     if (!chartRef.current) return;
@@ -209,13 +219,13 @@ export default function NetWorthChart({ ccy }: NetWorthChartProps) {
       </div>
 
       {loading ? (
-        <div className="h-56 sm:h-64 flex items-center justify-center text-ink-dim text-sm">Loading chart…</div>
+        <div className="h-56 sm:h-64 md:h-72 flex items-center justify-center text-ink-dim text-sm">Loading chart…</div>
       ) : error ? (
-        <div className="h-56 sm:h-64 flex items-center justify-center text-bad text-sm">{error}</div>
+        <div className="h-56 sm:h-64 md:h-72 flex items-center justify-center text-bad text-sm">{error}</div>
       ) : data.length === 0 ? (
-        <div className="h-56 sm:h-64 flex items-center justify-center text-ink-dim text-sm">No data</div>
+        <div className="h-56 sm:h-64 md:h-72 flex items-center justify-center text-ink-dim text-sm">No data</div>
       ) : (
-        <div ref={chartRef} className="h-56 sm:h-64 w-full" />
+        <div ref={chartRef} className="h-56 sm:h-64 md:h-72 w-full" />
       )}
     </div>
   );

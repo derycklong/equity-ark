@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
-import { fmtMoney, fmtPct, fmtNum, fmtDate, ccySymbol } from "../lib/utils";
+import { fmtMoney, fmtMoneyCeil, fmtPct, fmtNum, fmtDate, ccySymbol } from "../lib/utils";
 import { ArrowUpRight, ArrowDownRight, ArrowUp, ArrowDown } from "lucide-react";
 import { useHoldings } from "../hooks/usePortfolio";
 import { LoadingScreen } from "../components/LoadingScreen";
@@ -13,6 +13,8 @@ interface Holding extends HoldingBase {
   display_total_return: number;
   total_return_pct: number;
   unreal_pct: number;
+  real_pct: number;
+  div_pct: number;
   hasPrice: boolean;
 }
 
@@ -66,8 +68,10 @@ export default function Holdings() {
     const divs = h.dividends_received ?? 0;
     const totalPnl = unrealPnl + realizedPnl + divs;
     const unrealPct = h.cost_basis > 0 ? unrealPnl / h.cost_basis : 0;
+    const realPct = h.cost_basis > 0 ? realizedPnl / h.cost_basis : 0;
+    const divPct = h.cost_basis > 0 ? divs / h.cost_basis : 0;
     const totalReturnPct = h.cost_basis > 0 ? totalPnl / h.cost_basis : 0;
-    return { ...h, display_mv: mv, display_pnl: totalPnl, display_pnl_pct: totalReturnPct, display_total_return: totalPnl, total_return_pct: totalReturnPct, unreal_pct: unrealPct, hasPrice };
+    return { ...h, display_mv: mv, display_pnl: totalPnl, display_pnl_pct: totalReturnPct, display_total_return: totalPnl, total_return_pct: totalReturnPct, unreal_pct: unrealPct, real_pct: realPct, div_pct: divPct, hasPrice };
   }), [holdings]);
 
   const filtered = enriched.filter((h) => {
@@ -188,39 +192,69 @@ export default function Holdings() {
             renderCard={(h) => (
               <div
                 onClick={() => setSelected(h)}
-                className={`rounded-lg border border-line bg-bg-card p-3 active:scale-[0.99] transition-transform cursor-pointer ${selected?.symbol === h.symbol ? "ring-1 ring-accent" : ""}`}
+                className={`rounded-lg border bg-bg-card px-3 py-2.5 active:scale-[0.99] transition-transform cursor-pointer ${selected?.symbol === h.symbol ? "border-accent ring-1 ring-inset ring-accent/40" : "border-line"}`}
               >
-                <div className="flex items-start justify-between gap-2">
+                {/* Header: symbol + name + market on left, mkt val + cost basis on right */}
+                <div className="flex items-baseline justify-between gap-2">
                   <div className="min-w-0 flex-1">
-                    <div className="font-medium truncate leading-tight">{h.name || h.symbol}</div>
-                    {h.name && <div className="text-ink-faint text-sm tabular-nums truncate">{h.symbol}</div>}
-                    <div className="text-xs text-ink-faint uppercase mt-0.5">{h.market} · {h.currency}</div>
+                    <div className="font-medium text-sm leading-tight truncate">{h.symbol}</div>
+                    <div className="text-[10px] text-ink-faint uppercase tracking-wider truncate leading-tight mt-0.5">
+                      {(h.name || "").trim()} · {h.market}
+                    </div>
                   </div>
-                  <div className="text-right shrink-0">
-                    <div className="text-sm font-medium tabular-nums">{fmtMoney(h.display_mv, ccy)}</div>
-                    <div className="text-xs text-ink-faint tabular-nums">Mkt val</div>
+                  <div className="text-right shrink-0 leading-tight">
+                    <div className="text-sm font-semibold tabular-nums">{fmtMoneyCeil(h.display_mv, ccy)}</div>
+                    <div className="text-[10px] text-ink-faint tabular-nums mt-0.5">
+                      Cost <span className="text-ink-dim">{fmtMoneyCeil(h.cost_basis, ccy)}</span>
+                    </div>
                   </div>
                 </div>
-                <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 text-sm">
-                  <Mini2 label="Qty" value={fmtNum(h.quantity, 2)} />
-                  <Mini2 label="Avg cost" value={`${ccySymbol(h.currency)} ${fmtNum(h.avg_cost, 2)}`} />
-                  <Mini2 label="Price" value={h.hasPrice ? fmtNum(h.current_price!, 2) : "at cost"} muted={!h.hasPrice} />
-                  <Mini2
+
+                {/* Position stats: Qty · Avg · Price (no Day — it's in the P&L group below) */}
+                <div className="mt-2 flex items-center justify-between gap-3 text-xs tabular-nums">
+                  <Kv label="Qty" value={fmtNum(h.quantity, 2)} />
+                  <Kv label="Avg" value={fmtNum(h.avg_cost, 2)} />
+                  <Kv label="Price" value={fmtNum(h.current_price ?? 0, 2)} muted={!h.hasPrice} />
+                </div>
+
+                {/* P&L group: Day · Dividends · Realized · Unrealized — always grouped
+                    together. 2×2 grid instead of 4-across so currency-tagged
+                    values like "7,158,191 SGD" fit without truncation on
+                    iPhone-sized viewports. Each cell is ~180px wide. */}
+                <div className="mt-2 pt-2 border-t border-line/40 grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs">
+                  <KvBlock
                     label="Day"
-                    value={
-                      <span className={(h.day_change ?? 0) >= 0 ? "text-good" : "text-bad"}>
-                        {fmtMoney(h.day_change ?? 0, ccy)}{" "}
-                        <span className="text-xs">({fmtPct(h.day_change_pct ?? 0, 2)})</span>
-                      </span>
-                    }
+                    amount={fmtMoneyCeil(h.day_change ?? 0, ccy)}
+                    pct={fmtPct(h.day_change_pct ?? 0, 1)}
+                    tone={(h.day_change ?? 0) >= 0 ? "good" : "bad"}
+                  />
+                  <KvBlock
+                    label="Dividends"
+                    amount={fmtMoneyCeil(h.dividends_received ?? 0, ccy)}
+                    pct={fmtPct(h.div_pct, 1)}
+                    tone={(h.dividends_received ?? 0) > 0 ? "warn" : "muted"}
+                  />
+                  <KvBlock
+                    label="Realized"
+                    amount={fmtMoneyCeil(h.realized_pnl ?? 0, ccy)}
+                    pct={fmtPct(h.real_pct, 1)}
+                    tone={(h.realized_pnl ?? 0) >= 0 ? "good" : "bad"}
+                  />
+                  <KvBlock
+                    label="Unrealized"
+                    amount={fmtMoneyCeil(h.unrealized_pnl ?? 0, ccy)}
+                    pct={fmtPct(h.unreal_pct, 1)}
+                    tone={(h.unrealized_pnl ?? 0) >= 0 ? "good" : "bad"}
                   />
                 </div>
-                <div className="mt-2 pt-2 border-t border-line/50 flex items-baseline justify-between">
-                  <span className="text-xs text-ink-faint">Total P&L (incl. divs)</span>
+
+                {/* Total P&L — bottom, right-aligned, prominent */}
+                <div className="mt-2 pt-2 border-t border-line/40 flex items-baseline justify-between">
+                  <span className="text-[10px] text-ink-faint uppercase tracking-wider">Total P&amp;L</span>
                   <span className={`text-sm font-semibold tabular-nums ${h.display_pnl >= 0 ? "text-good" : "text-bad"}`}>
                     {h.display_pnl >= 0 ? <ArrowUpRight size={12} className="inline" /> : <ArrowDownRight size={12} className="inline" />}
-                    {" "}{fmtMoney(h.display_pnl, ccy)}{" "}
-                    <span className="text-xs font-normal">({fmtPct(h.total_return_pct, 1)})</span>
+                    {" "}{fmtMoneyCeil(h.display_pnl, ccy)}{" "}
+                    <span className={`text-[10px] font-normal ${h.display_pnl >= 0 ? "text-good" : "text-bad"}`}>({fmtPct(h.total_return_pct, 1)})</span>
                   </span>
                 </div>
               </div>
@@ -406,6 +440,30 @@ function Mini2({ label, value, muted }: { label: string; value: React.ReactNode;
     <div className="min-w-0">
       <div className="text-[10px] uppercase tracking-wider text-ink-faint leading-tight">{label}</div>
       <div className={`text-sm tabular-nums truncate leading-tight ${muted ? "text-ink-faint" : ""}`}>{value}</div>
+    </div>
+  );
+}
+
+function Kv({ label, value, muted, tone }: { label: string; value: React.ReactNode; muted?: boolean; tone?: "good" | "bad" | "warn" | "muted" }) {
+  const toneClass = tone === "good" ? "text-good" : tone === "bad" ? "text-bad" : tone === "warn" ? "text-warn" : tone === "muted" || muted ? "text-ink-faint" : "";
+  return (
+    <span className="flex items-baseline gap-1 min-w-0">
+      <span className="text-[10px] uppercase tracking-wider text-ink-faint shrink-0">{label}</span>
+      <span className={`tabular-nums truncate ${toneClass}`}>{value}</span>
+    </span>
+  );
+}
+
+function KvBlock({ label, amount, pct, tone }: { label: string; amount: string; pct: string; tone: "good" | "bad" | "warn" | "muted" }) {
+  const toneClass = tone === "good" ? "text-good" : tone === "bad" ? "text-bad" : tone === "warn" ? "text-warn" : "text-ink-faint";
+  return (
+    <div className="min-w-0">
+      <div className="text-[10px] uppercase tracking-wider text-ink-faint truncate leading-tight">{label}</div>
+      {/* Amount uses xs (12px) instead of sm (14px) so currency-tagged
+          values like "7,158,191 SGD" fit inside the narrow 4-col grid on
+          iPhone-sized viewports without truncation. */}
+      <div className={`text-xs font-medium tabular-nums truncate leading-tight ${toneClass}`}>{amount}</div>
+      <div className={`text-[10px] tabular-nums leading-tight ${toneClass}`}>{pct}</div>
     </div>
   );
 }
