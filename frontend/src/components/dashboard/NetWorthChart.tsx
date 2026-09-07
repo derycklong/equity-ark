@@ -1,23 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as echarts from "echarts";
 import { useQuery } from "@tanstack/react-query";
+import { Box, Card, CardContent, Chip, Stack, Typography } from "@mui/material";
+import { alpha, useTheme as useMuiTheme } from "@mui/material/styles";
 import { api } from "../../lib/api";
 import { ccySymbol, fmtMoneyFull } from "../../lib/utils";
-import { useTheme } from "../../lib/theme";
 
 interface NetWorthChartProps {
   ccy: string;
 }
 
-function cssVar(name: string): string {
-  if (typeof window === "undefined") return "";
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
-
 export default function NetWorthChart({ ccy }: NetWorthChartProps) {
   const chartRef = useRef<HTMLDivElement>(null);
   const chartInstance = useRef<echarts.ECharts | null>(null);
-  const { theme } = useTheme();
+  const theme = useMuiTheme();
   const { data: networthData, isLoading: loading, error: queryError } = useQuery({
     queryKey: ["networthHistory"],
     queryFn: () => api.networthHistory(),
@@ -36,40 +32,6 @@ export default function NetWorthChart({ ccy }: NetWorthChartProps) {
     return "wide";
   };
   const [widthBucket, setWidthBucket] = useState<string>(getWidthBucket);
-  // Track colors in state so they update AFTER the DOM class flip from
-  // ThemeProvider's useEffect has been applied.
-  const [colors, setColors] = useState(() => ({
-    line: cssVar("--color-accent"),
-    text: cssVar("--color-ink-dim"),
-    grid: cssVar("--color-line"),
-    bg: cssVar("--color-bg-card"),
-    ink: cssVar("--color-ink"),
-    warn: cssVar("--color-warn"),
-  }));
-
-  useEffect(() => {
-    const readColors = () => ({
-      line: cssVar("--color-accent"),
-      text: cssVar("--color-ink-dim"),
-      grid: cssVar("--color-line"),
-      bg: cssVar("--color-bg-card"),
-      ink: cssVar("--color-ink"),
-      warn: cssVar("--color-warn"),
-    });
-    setColors(readColors());
-
-    // Watch the <html> element for class changes (theme toggle flips
-    // html.dark ↔ html.light, which updates all CSS variables).
-    const observer = new MutationObserver(() => {
-      setColors(readColors());
-    });
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class"],
-    });
-    return () => observer.disconnect();
-  }, [theme]);
-
   // Track viewport width so the x-axis label format adapts.
   useEffect(() => {
     const onResize = () => setWidthBucket(getWidthBucket());
@@ -84,39 +46,48 @@ export default function NetWorthChart({ ccy }: NetWorthChartProps) {
     const nwValues = data.map((d) => d.net_worth);
     const flowValues = data.map((d) => d.net_buy_sell);
 
-    const lineColor = colors.line ? `rgb(${colors.line})` : "#60a5fa";
-    const textColor = colors.text ? `rgb(${colors.text})` : "#9ca3af";
-    const gridColor = colors.grid ? `rgb(${colors.grid})` : "#262632";
-    const tooltipBg = colors.bg ? `rgb(${colors.bg})` : "#161a23";
-    const tooltipText = colors.ink ? `rgb(${colors.ink})` : "#e5e7eb";
+     const lineColor = theme.palette.primary.main;
+     const textColor = theme.palette.text.secondary;
+     const gridColor = alpha(theme.palette.divider, 0.68);
+     const tooltipBg = theme.palette.background.paper;
+     const tooltipText = theme.palette.text.primary;
+     const axisText = alpha(theme.palette.text.secondary, 0.9);
 
     return {
       backgroundColor: "transparent",
       tooltip: {
         trigger: "axis",
-        axisPointer: { type: "cross" },
+        axisPointer: {
+          type: "line",
+          lineStyle: { color: alpha(theme.palette.primary.main, 0.38), width: 1 },
+        },
         backgroundColor: tooltipBg,
         borderColor: gridColor,
-        textStyle: { color: tooltipText },
+        borderWidth: 1,
+        padding: [10, 12],
+        textStyle: { color: tooltipText, fontFamily: "var(--app-font-family)", fontSize: 12 },
+        extraCssText: "border-radius: 10px; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16);",
         formatter: (params: any[]) => {
           const date = params[0]?.axisValue ?? "";
           const nw = params.find((p: any) => p.seriesName === "Net Worth")?.value ?? 0;
           const flow = params.find((p: any) => p.seriesName === "Monthly Buy/Sell")?.value ?? 0;
-          return `<div style="font-weight:500">${date}</div>
-            <div>Net Worth: <b>${fmtMoneyFull(nw, ccy)}</b></div>
-            <div>Monthly Buy/Sell: <b>${fmtMoneyFull(flow, ccy)}</b></div>`;
+          return `<div style="font-weight:700;margin-bottom:6px">${date}</div>
+            <div style="margin:3px 0"><span style="color:${lineColor}">●</span> Net worth: <b>${fmtMoneyFull(nw, ccy)}</b></div>
+            <div style="margin:3px 0"><span style="color:${alpha(theme.palette.success.main, 0.9)}">●</span> Monthly buy/sell: <b>${fmtMoneyFull(flow, ccy)}</b></div>`;
         },
       },
       legend: {
         show: false,
       },
-      grid: { left: "3%", right: "4%", bottom: widthBucket === "wide" ? 30 : 50, top: 16, containLabel: true },
+      grid: { left: "2.5%", right: "2.5%", bottom: widthBucket === "wide" ? 30 : 50, top: 14, containLabel: true },
       xAxis: {
         type: "category",
         data: dates,
-        axisLine: { lineStyle: { color: gridColor } },
-        axisLabel: {
-          color: textColor,
+         axisLine: { show: false },
+         axisTick: { show: false },
+         axisLabel: {
+           color: axisText,
+           margin: 12,
           // Rotate labels on smaller viewports so they don't squash together.
           rotate: widthBucket === "wide" ? 0 : 35,
           // Always hide overlapping labels as a final safety net — ECharts
@@ -144,9 +115,10 @@ export default function NetWorthChart({ ccy }: NetWorthChartProps) {
           scale: true,
           name: "",
           nameTextStyle: { color: textColor },
-          axisLine: { show: true, lineStyle: { color: gridColor } },
-          axisLabel: { color: textColor, formatter: (v: number) => `${ccySymbol(ccy)}${(v / 1000).toFixed(1)}k` },
-          splitLine: { lineStyle: { color: gridColor, type: "dashed" } },
+           axisLine: { show: false },
+           axisTick: { show: false },
+           axisLabel: { color: axisText, margin: 12, formatter: (v: number) => `${ccySymbol(ccy)}${(v / 1000).toFixed(1)}k` },
+           splitLine: { lineStyle: { color: gridColor, type: "dashed", width: 1 } },
         },
         {
           type: "value",
@@ -154,8 +126,9 @@ export default function NetWorthChart({ ccy }: NetWorthChartProps) {
           scale: true,
           name: "",
           nameTextStyle: { color: textColor },
-          axisLine: { show: true, lineStyle: { color: gridColor } },
-          axisLabel: { color: textColor, formatter: (v: number) => `${ccySymbol(ccy)}${(v / 1000).toFixed(1)}k` },
+           axisLine: { show: false },
+           axisTick: { show: false },
+           axisLabel: { color: axisText, margin: 12, formatter: (v: number) => `${ccySymbol(ccy)}${(v / 1000).toFixed(1)}k` },
           splitLine: { show: false },
         },
       ],
@@ -168,13 +141,14 @@ export default function NetWorthChart({ ccy }: NetWorthChartProps) {
           smooth: true,
           showSymbol: true,
           symbol: "circle",
-          symbolSize: 6,
-          lineStyle: { width: 2.5, color: lineColor },
-          itemStyle: { color: lineColor },
+           symbolSize: 7,
+           lineStyle: { width: 3, color: lineColor, cap: "round", join: "round" },
+           itemStyle: { color: lineColor, borderColor: theme.palette.background.paper, borderWidth: 2 },
+           emphasis: { focus: "series", scale: true, itemStyle: { borderWidth: 3 } },
           areaStyle: {
-            color: new (echarts as any).graphic.LinearGradient(0, 0, 0, 1, [
-              { offset: 0, color: "rgba(96, 165, 250, 0.3)" },
-              { offset: 1, color: "rgba(96, 165, 250, 0.02)" },
+              color: new (echarts as any).graphic.LinearGradient(0, 0, 0, 1, [
+               { offset: 0, color: alpha(theme.palette.primary.main, 0.3) },
+               { offset: 1, color: alpha(theme.palette.primary.main, 0.02) },
             ]),
           },
         },
@@ -184,12 +158,17 @@ export default function NetWorthChart({ ccy }: NetWorthChartProps) {
           yAxisIndex: 1,
           data: flowValues.map((v: number) => ({
             value: v,
-            itemStyle: { color: v >= 0 ? "rgba(34, 197, 94, 0.7)" : "rgba(239, 68, 68, 0.7)" },
+             itemStyle: {
+               color: v >= 0 ? alpha(theme.palette.success.main, 0.58) : alpha(theme.palette.error.main, 0.58),
+               borderRadius: v >= 0 ? [4, 4, 0, 0] : [0, 0, 4, 4],
+             },
           })),
+          barMaxWidth: 28,
+          emphasis: { focus: "series" },
         },
       ],
     };
-  }, [data, ccy, colors, widthBucket]);
+  }, [data, ccy, theme, widthBucket]);
 
   useEffect(() => {
     if (!chartRef.current) return;
@@ -205,28 +184,39 @@ export default function NetWorthChart({ ccy }: NetWorthChartProps) {
   }, [option]);
 
   return (
-    <div className="rounded-xl border border-line bg-bg-card p-4">
-      <div className="flex items-baseline justify-between gap-3 mb-4">
-        <div>
-          <h3 className="text-base font-semibold">Net Worth</h3>
-          <div className="flex items-baseline gap-2 mt-0.5">
-            <span className="text-xl font-semibold tabular-nums tracking-tight">
-              {fmtMoneyFull(latest?.net_worth ?? 0, ccy)}
-            </span>
-          </div>
-        </div>
-        <span className="text-xs text-ink-faint">last 12 months</span>
-      </div>
+    <Card variant="outlined">
+      <CardContent sx={{ p: { xs: 1.5, sm: 2 }, "&:last-child": { pb: { xs: 1.5, sm: 2 } } }}>
+        <Stack direction="row" sx={{ alignItems: "flex-start", justifyContent: "space-between", gap: 1.5, mb: 1.25 }}>
+          <Box>
+            <Typography variant="h3">Net worth</Typography>
+            <Typography variant="h2" sx={{ fontSize: "1.25rem", mt: 0.25, fontVariantNumeric: "tabular-nums" }}>{fmtMoneyFull(latest?.net_worth ?? 0, ccy)}</Typography>
+            <Stack direction="row" spacing={1.25} sx={{ mt: 0.75, alignItems: "center", flexWrap: "wrap" }}>
+              <ChartLegend color={theme.palette.primary.main} label="Net worth" />
+              <ChartLegend color={theme.palette.success.main} label="Monthly buy/sell" />
+            </Stack>
+          </Box>
+          <Chip size="small" variant="outlined" label="Last 12 months" sx={{ height: 24, fontSize: "0.68rem" }} />
+        </Stack>
 
       {loading ? (
-        <div className="h-56 sm:h-64 md:h-72 flex items-center justify-center text-ink-dim text-sm">Loading chart…</div>
+        <Box sx={{ height: { xs: 224, sm: 256, md: 288 }, display: "flex", alignItems: "center", justifyContent: "center" }}><Typography variant="body2" color="text.secondary">Loading chart…</Typography></Box>
       ) : error ? (
-        <div className="h-56 sm:h-64 md:h-72 flex items-center justify-center text-bad text-sm">{error}</div>
+        <Box sx={{ height: { xs: 224, sm: 256, md: 288 }, display: "flex", alignItems: "center", justifyContent: "center" }}><Typography variant="body2" color="error">{error}</Typography></Box>
       ) : data.length === 0 ? (
-        <div className="h-56 sm:h-64 md:h-72 flex items-center justify-center text-ink-dim text-sm">No data</div>
+        <Box sx={{ height: { xs: 224, sm: 256, md: 288 }, display: "flex", alignItems: "center", justifyContent: "center" }}><Typography variant="body2" color="text.secondary">No data</Typography></Box>
       ) : (
-        <div ref={chartRef} className="h-56 sm:h-64 md:h-72 w-full" />
+        <Box ref={chartRef} sx={{ height: { xs: 224, sm: 256, md: 288 }, width: "100%" }} />
       )}
-    </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ChartLegend({ color, label }: { color: string; label: string }) {
+  return (
+    <Stack direction="row" spacing={0.5} sx={{ alignItems: "center" }}>
+      <Box sx={{ width: 7, height: 7, borderRadius: "50%", bgcolor: color }} />
+      <Typography variant="caption" color="text.secondary">{label}</Typography>
+    </Stack>
   );
 }

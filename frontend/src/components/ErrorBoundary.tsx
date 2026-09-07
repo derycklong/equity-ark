@@ -1,5 +1,6 @@
 import { Component, ErrorInfo, ReactNode } from "react";
 import { Link } from "react-router-dom";
+import { Alert, Box, Button, Stack, Typography } from "@mui/material";
 
 interface Props {
   children: ReactNode;
@@ -23,26 +24,23 @@ export class ErrorBoundary extends Component<Props, State> {
   render() {
     if (this.state.error) {
       return (
-        <div className="min-h-full flex items-center justify-center p-6">
-          <div className="max-w-md w-full text-center space-y-4">
-            <h1 className="text-2xl font-semibold">Something went wrong</h1>
-            <p className="text-ink-dim text-sm">{this.state.error.message || "Unknown error"}</p>
-            <div className="flex justify-center gap-2">
-              <button
+        <Box sx={{ minHeight: "100%", display: "flex", alignItems: "center", justifyContent: "center", p: 3 }}>
+          <Stack spacing={2} sx={{ maxWidth: 420, width: "100%", textAlign: "center" }}>
+            <Typography variant="h2">Something went wrong</Typography>
+            <Alert severity="error" variant="outlined" sx={{ textAlign: "left" }}>
+              {this.state.error.message || "Unknown error"}
+            </Alert>
+            <Stack direction="row" spacing={1} sx={{ justifyContent: "center" }}>
+              <Button
+                variant="outlined"
                 onClick={() => this.setState({ error: null })}
-                className="rounded-md border border-line bg-bg-card hover:bg-bg-soft px-4 py-2 text-sm"
               >
                 Try again
-              </button>
-              <Link
-                to="/"
-                className="rounded-md border border-line bg-bg-card hover:bg-bg-soft px-4 py-2 text-sm"
-              >
-                Go home
-              </Link>
-            </div>
-          </div>
-        </div>
+              </Button>
+              <Button component={Link} to="/" variant="contained">Go home</Button>
+            </Stack>
+          </Stack>
+        </Box>
       );
     }
     return this.props.children;

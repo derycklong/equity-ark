@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Box, CircularProgress, Stack, Typography } from "@mui/material";
 import { Navigate, useLocation } from "react-router-dom";
 import { api } from "../lib/api";
 import { useStore } from "../stores/useStore";
@@ -24,11 +25,7 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
   }, [setUser, location.pathname]);
 
   if (status === "loading") {
-    return (
-      <div className="min-h-full flex items-center justify-center text-ink-dim">
-        Loading…
-      </div>
-    );
+    return <Box sx={{ minHeight: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}><Stack direction="row" spacing={1} sx={{ alignItems: "center", color: "text.secondary" }}><CircularProgress size={18} /><Typography variant="body2">Loading…</Typography></Stack></Box>;
   }
   if (status === "unauthed") {
     return <Navigate to="/login" state={{ from: location.pathname }} replace />;

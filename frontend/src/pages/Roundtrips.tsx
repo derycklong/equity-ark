@@ -1,9 +1,14 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
+import { Box, Button, Card, CardContent, Chip, Collapse, Divider, IconButton, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TableSortLabel, TextField, ToggleButton, ToggleButtonGroup, Typography } from "@mui/material";
+import ExpandMoreRounded from "@mui/icons-material/ExpandMoreRounded";
+import CompareArrowsOutlined from "@mui/icons-material/CompareArrowsOutlined";
 import { fmtNum, fmtDate, fmtPct, ccySymbol } from "../lib/utils";
-import { ArrowUpRight, ArrowDownRight, Calendar, TrendingUp, TrendingDown, ChevronDown, ChevronUp, Layers } from "lucide-react";
 import { useRoundtrips } from "../hooks/usePortfolio";
 import { LoadingScreen } from "../components/LoadingScreen";
 import MobileTable from "../components/MobileTable";
+import PageHeader from "../components/ui/PageHeader";
+import MetricCard from "../components/ui/MetricCard";
+import { marketLabel } from "../components/dashboard/shared";
 
 type Roundtrip = {
   symbol: string;
@@ -169,6 +174,13 @@ function formatHoldDays(d: number): string {
   return remMonths > 0 ? `${years}y ${remMonths}mo` : `${years}y`;
 }
 
+function Mini({ label, value, tone = "text.primary" }: { label: string; value: ReactNode; tone?: string }) {
+  return <Box sx={{ minWidth: 0 }}>
+    <Typography variant="caption" color="text.secondary" sx={{ display: "block", textTransform: "uppercase", fontWeight: 700, letterSpacing: "0.06em" }}>{label}</Typography>
+    <Typography variant="body2" color={tone} sx={{ fontWeight: 600, fontVariantNumeric: "tabular-nums" }} noWrap>{value}</Typography>
+  </Box>;
+}
+
 export default function Roundtrips() {
   const { data: rtData, isLoading } = useRoundtrips();
   const rts = rtData?.roundtrips || [];
@@ -250,73 +262,55 @@ const [sortDesc, setSortDesc] = useState(true);
   };
 
   const SortHeader = ({ label, statKey, align = "right" }: { label: string; statKey: SortKey; align?: "left" | "right" }) => (
-    <th
-      className={`${align === "right" ? "text-right" : "text-left"} px-3 py-2.5 font-medium text-sm uppercase cursor-pointer select-none hover:text-ink ${sortKey === statKey ? "text-ink" : "text-ink-faint"}`}
-      onClick={() => handleSort(statKey)}
-    >
-      {label}
-      {sortKey === statKey && (sortDesc ? " ↓" : " ↑")}
-    </th>
+    <TableCell align={align}>
+      <TableSortLabel active={sortKey === statKey} direction={sortKey === statKey ? (sortDesc ? "desc" : "asc") : "asc"} onClick={() => handleSort(statKey)}>{label}</TableSortLabel>
+    </TableCell>
   );
 
   if (isLoading) return <LoadingScreen />;
 
   return (
-    <div className="md:flex md:flex-col md:h-[calc(100vh-4rem)]">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-3">
-        <div>
-          <h1 className="text-xl font-semibold">Closed positions</h1>
-          <p className="text-ink-dim text-sm">
-            {filtered.length} roundtrips · {stats.wins} winners · {stats.losses} losers
-          </p>
-        </div>
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-2 sm:flex-wrap">
-          <input
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 2, minHeight: { md: "calc(100vh - 96px)" } }}>
+      <PageHeader
+        title="Closed positions"
+        icon={<CompareArrowsOutlined />}
+        subtitle={`${filtered.length} roundtrips · ${stats.wins} winners · ${stats.losses} losers`}
+        actions={
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ width: { xs: "100%", sm: "auto" }, justifyContent: { xs: "stretch", sm: "flex-end" } }}>
+          <TextField
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            placeholder="Filter symbol or name…"
-            className="rounded-md border border-line bg-bg-card px-3 py-1.5 text-sm w-full sm:w-auto"
+            label="Search"
+            placeholder="Symbol or name"
+            size="small"
+            sx={{ width: { xs: "100%", sm: 220 } }}
           />
-          <div className="flex gap-1 text-sm">
-            {(["all", "profit", "loss"] as const).map((f) => (
-              <button
-                key={f}
-                onClick={() => setFilterType(f)}
-                className={`px-2.5 py-1 rounded capitalize ${
-                  filterType === f
-                    ? "bg-brand text-white"
-                    : "text-ink-dim hover:text-ink bg-bg-card border border-line"
-                }`}
-              >
-                {f}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
+          <ToggleButtonGroup size="small" fullWidth exclusive value={filterType} onChange={(_, value) => value && setFilterType(value)} aria-label="Roundtrip result filter" sx={{ width: { xs: "100%", sm: "auto" } }}>
+            <ToggleButton value="all">All</ToggleButton><ToggleButton value="profit" color="success">Profit</ToggleButton><ToggleButton value="loss" color="error">Loss</ToggleButton>
+          </ToggleButtonGroup>
+          </Stack>
+        }
+      />
 
-      <div className="md:flex-1 min-h-0 rounded-lg border border-line bg-bg-card overflow-hidden md:flex md:flex-col">
+      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2, 1fr)", md: "repeat(4, 1fr)" }, gap: 1.5 }}>
+        <MetricCard label="Closed positions" value={stats.total} supporting={`${filtered.length} shown`} tone="primary" icon={<CompareArrowsOutlined fontSize="small" />} />
+        <MetricCard label="Winners" value={stats.wins} supporting={stats.total ? `${fmtPct(stats.wins / stats.total, 1)} win rate` : "—"} tone="success" />
+        <MetricCard label="Losers" value={stats.losses} supporting="closed trades below cost" tone="error" />
+        <MetricCard label="Total P&L" value={fmtNum(stats.totalPnl, 2)} supporting="native roundtrip sum" tone={stats.totalPnl >= 0 ? "success" : "error"} />
+      </Box>
+
+      <Card variant="outlined" sx={{ overflow: "hidden", minHeight: { md: 0 }, flex: { md: 1 }, display: { md: "flex" }, flexDirection: { md: "column" } }}>
         {/* Mobile: expand/collapse all controls */}
-        <div className="md:hidden flex items-center justify-between px-3 py-2 border-b border-line bg-bg-soft/40 text-sm">
-          <span className="text-ink-faint">{sellGroups.length} sell{sellGroups.length !== 1 ? "s" : ""}</span>
-          <div className="flex gap-1">
+        <Stack direction="row" sx={{ display: { xs: "flex", md: "none" }, alignItems: "center", justifyContent: "space-between", px: 1.5, py: 1, bgcolor: "action.hover", borderBottom: 1, borderColor: "divider" }}>
+          <Typography variant="caption" color="text.secondary">{sellGroups.length} sell{sellGroups.length !== 1 ? "s" : ""}</Typography>
+          <Stack direction="row" spacing={1}>
             {expanded.size > 0 ? (
-              <button
-                onClick={collapseAll}
-                className="rounded border border-line bg-bg-card px-2 py-0.5 text-ink-dim hover:text-ink"
-              >
-                Collapse all
-              </button>
+              <Button size="small" variant="outlined" onClick={collapseAll}>Collapse all</Button>
             ) : (
-              <button
-                onClick={expandAll}
-                className="rounded border border-line bg-bg-card px-2 py-0.5 text-ink-dim hover:text-ink"
-              >
-                Expand all
-              </button>
+              <Button size="small" variant="outlined" onClick={expandAll}>Expand all</Button>
             )}
-          </div>
-        </div>
+          </Stack>
+        </Stack>
 
         <MobileTable
           items={sellGroups}
@@ -328,113 +322,67 @@ const [sortDesc, setSortDesc] = useState(true);
             const isProfit = g.total_pnl >= 0;
             const sym = ccySymbol(g.currency);
             const isOpen = expanded.has(g.key);
-            const Arrow = isProfit ? TrendingUp : TrendingDown;
             return (
-              <div className={`rounded-lg border bg-bg-card overflow-hidden ${isOpen ? "border-accent/40" : "border-line"}`}>
-                <button
-                  type="button"
-                  onClick={() => toggleExpanded(g.key)}
-                  aria-expanded={isOpen}
-                  className="w-full text-left p-3 active:bg-bg-soft/40 transition-colors"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <span className="font-semibold truncate leading-tight">{g.name || g.symbol}</span>
-                        {isOpen
-                          ? <ChevronUp size={14} className="text-ink-faint shrink-0" />
-                          : <ChevronDown size={14} className="text-ink-faint shrink-0" />}
-                      </div>
-                      {g.name && <div className="text-ink-faint text-sm tabular-nums truncate">{g.symbol}</div>}
-                      <div className="text-xs text-ink-faint uppercase mt-0.5">{g.market} · {g.currency}</div>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <div className={`text-sm font-semibold tabular-nums ${isProfit ? "text-good" : "text-bad"}`}>
-                        {isProfit ? "▲" : "▼"} {sym} {fmtNum(Math.abs(g.total_pnl), 2)}
-                      </div>
-                      <div className={`text-xs tabular-nums ${isProfit ? "text-good" : "text-bad"}`}>
-                        {fmtPct(g.weighted_pnl_pct, 1)}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mt-2 pt-2 border-t border-line/50 flex items-center justify-between text-xs text-ink-faint">
-                    <span className="flex items-center gap-1">
-                      <ArrowDownRight size={11} className="text-warn" />
-                      Sold {fmtNum(g.total_qty, 0)} sh × {sym}{fmtNum(g.sell_price, 2)} · {fmtDate(g.sell_date)}
-                    </span>
-                    <span className="flex items-center gap-2">
-                      <Calendar size={11} /> {formatHoldRange(g.min_hold, g.max_hold)}
-                      <span className="inline-flex items-center gap-0.5 text-ink-dim">
-                        <Layers size={10} /> {g.legs.length} leg{g.legs.length !== 1 ? "s" : ""}
-                      </span>
-                    </span>
-                  </div>
-                </button>
-
-                {isOpen && (
-                  <div className="border-t border-line/60 bg-bg-soft/30 px-2 py-1.5 space-y-1">
-                    {g.legs.map((leg, i) => {
-                      const legProfit = leg.pnl >= 0;
-                      return (
-                        <div key={i} className="flex items-center justify-between gap-2 text-sm py-1 px-1.5 rounded hover:bg-bg-card/60">
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-1.5">
-                              <ArrowUpRight size={10} className="text-accent shrink-0" />
-                              <span className="text-xs text-ink-dim tabular-nums">{fmtDate(leg.buy_date)}</span>
-                              <span className="text-ink-faint">·</span>
-                              <span className="text-xs tabular-nums">{fmtNum(leg.quantity, 0)} sh</span>
-                              <span className="text-ink-faint">×</span>
-                              <span className="text-xs tabular-nums">{sym}{fmtNum(leg.buy_price, 2)}</span>
-                            </div>
-                            <div className="text-[11px] text-ink-faint mt-0.5 tabular-nums">
-                              Held {formatHoldDays(leg.hold_days)} · cost {sym}{fmtNum(leg.cost, 0)}
-                            </div>
-                          </div>
-                          <div className="text-right shrink-0">
-                            <div className={`text-xs font-semibold tabular-nums ${legProfit ? "text-good" : "text-bad"}`}>
-                              {legProfit ? "▲" : "▼"} {sym}{fmtNum(Math.abs(leg.pnl), 0)}
-                            </div>
-                            <div className={`text-[11px] tabular-nums ${legProfit ? "text-good" : "text-bad"}`}>
-                              {fmtPct(leg.pnl_pct, 1)}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                    {/* Subtotal footer inside the expanded panel */}
-                    <div className="flex items-center justify-between pt-1.5 mt-1.5 border-t border-line/40 text-xs">
-                      <span className="text-ink-faint">Subtotal</span>
-                      <span className={`tabular-nums font-medium ${isProfit ? "text-good" : "text-bad"}`}>
-                        {sym}{fmtNum(g.total_proceeds, 0)} − {sym}{fmtNum(g.total_cost, 0)} = {sym}{fmtNum(Math.abs(g.total_pnl), 0)} {g.total_pnl >= 0 ? "profit" : "loss"}
-                      </span>
-                    </div>
-                  </div>
-                )}
-              </div>
+              <Card variant="outlined" sx={{ borderColor: isOpen ? "primary.main" : "divider" }}>
+                <CardContent sx={{ p: 1.5, "&:last-child": { pb: 1.5 } }}>
+                  <Stack direction="row" sx={{ justifyContent: "space-between", alignItems: "flex-start", gap: 1 }}>
+                    <Box sx={{ minWidth: 0, flex: 1 }}>
+                      <Stack direction="row" spacing={0.75} sx={{ alignItems: "baseline", minWidth: 0 }}>
+                        <Typography variant="body2" sx={{ fontWeight: 700 }} noWrap>{g.symbol}</Typography>
+                        <Typography variant="caption" color="primary.main" sx={{ fontWeight: 700 }}>{g.currency}</Typography>
+                      </Stack>
+                      <Typography variant="caption" color="text.secondary" noWrap sx={{ display: "block", mt: 0.15 }}>{g.name ? `${g.name} · ` : ""}{marketLabel(g.market)}</Typography>
+                    </Box>
+                    <Box sx={{ textAlign: "right", flexShrink: 0 }}>
+                      <Typography variant="caption" color="text.secondary" sx={{ display: "block", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em" }}>P&amp;L</Typography>
+                      <Typography variant="body1" sx={{ color: isProfit ? "success.main" : "error.main", fontWeight: 750, fontVariantNumeric: "tabular-nums" }}>{isProfit ? "+" : "−"}{sym}{fmtNum(Math.abs(g.total_pnl), 2)}</Typography>
+                      <Typography variant="caption" sx={{ color: isProfit ? "success.main" : "error.main", fontVariantNumeric: "tabular-nums" }}>{fmtPct(g.weighted_pnl_pct, 1)}</Typography>
+                    </Box>
+                    <IconButton size="small" sx={{ minWidth: 32, minHeight: 32, flexShrink: 0 }} onClick={() => toggleExpanded(g.key)} aria-expanded={isOpen} aria-label={isOpen ? "Collapse legs" : "Expand legs"}>
+                      <ExpandMoreRounded fontSize="small" sx={{ transform: isOpen ? "rotate(180deg)" : "none", transition: "transform 160ms" }} />
+                    </IconButton>
+                  </Stack>
+                  <Divider sx={{ my: 1 }} />
+                  <Box sx={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 0.75 }}>
+                    <Mini label="Closed" value={fmtDate(g.sell_date)} />
+                    <Mini label="Qty" value={fmtNum(g.total_qty, 0)} />
+                    <Mini label="Sell" value={`${sym}${fmtNum(g.sell_price, 2)}`} />
+                    <Mini label="Held" value={formatHoldRange(g.min_hold, g.max_hold)} />
+                  </Box>
+                  <Stack direction="row" sx={{ justifyContent: "space-between", gap: 1, mt: 1, pt: 0.9, borderTop: 1, borderColor: "divider" }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontVariantNumeric: "tabular-nums" }}>Cost {sym}{fmtNum(g.total_cost, 2)}</Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontVariantNumeric: "tabular-nums" }}>Proceeds {sym}{fmtNum(g.total_proceeds, 2)} · {g.legs.length} leg{g.legs.length !== 1 ? "s" : ""}</Typography>
+                  </Stack>
+                  <Collapse in={isOpen} timeout="auto" unmountOnExit>
+                    <Divider sx={{ my: 1 }} />
+                    <Stack spacing={0.75}>
+                      {g.legs.map((leg, i) => {
+                        const legProfit = leg.pnl >= 0;
+                        return (
+                          <Stack key={i} direction="row" sx={{ justifyContent: "space-between", alignItems: "center", gap: 1, p: 0.75, borderRadius: 1.5, bgcolor: "action.hover" }}>
+                            <Box sx={{ minWidth: 0, flex: 1 }}>
+                              <Typography variant="caption" sx={{ fontVariantNumeric: "tabular-nums", fontWeight: 600 }} noWrap>{fmtDate(leg.buy_date)} · {fmtNum(leg.quantity, 0)} sh × {sym}{fmtNum(leg.buy_price, 2)}</Typography>
+                              <Typography variant="caption" color="text.secondary" sx={{ display: "block", fontVariantNumeric: "tabular-nums" }}>Held {formatHoldDays(leg.hold_days)}</Typography>
+                            </Box>
+                            <Typography variant="caption" sx={{ color: legProfit ? "success.main" : "error.main", fontWeight: 750, fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>{legProfit ? "+" : "−"}{sym}{fmtNum(Math.abs(leg.pnl), 0)}</Typography>
+                          </Stack>
+                        );
+                      })}
+                    </Stack>
+                  </Collapse>
+                </CardContent>
+              </Card>
             );
           }}
           renderTable={() => (
-            <div className="overflow-auto h-full md:flex-1">
-              <table className="w-full text-sm">
-                <thead className="text-ink-faint text-sm uppercase bg-bg-soft sticky top-0 z-10 border-b border-line">
-                  <tr>
-                    <th className="text-left pl-3 sm:pl-5 pr-3 sm:pr-4 py-2.5 font-medium">Symbol</th>
-                    <th className="text-left px-3 py-2.5 font-medium border-l border-line hidden md:table-cell">Market</th>
-                    <SortHeader label="Buy date" statKey="buy_date" align="right" />
-                    <th className="text-right px-3 py-2.5 font-medium hidden sm:table-cell">Buy price</th>
-                    <th className="text-right px-3 py-2.5 font-medium hidden sm:table-cell">Buy qty</th>
-                    <th className="text-right px-3 py-2.5 font-medium hidden sm:table-cell">Cost</th>
-                    <SortHeader label="Sell date" statKey="sell_date" align="right" />
-                    <th className="text-right px-3 py-2.5 font-medium hidden sm:table-cell">Sell price</th>
-                    <th className="text-right px-3 py-2.5 font-medium hidden sm:table-cell">Sell qty</th>
-                    <th className="text-right px-3 py-2.5 font-medium hidden sm:table-cell">Proceeds</th>
-                    <th className="text-right px-3 py-2.5 font-medium border-l border-line">P&amp;L</th>
-                    <SortHeader label="P&L %" statKey="pnl_pct" />
-                    <SortHeader label="Hold" statKey="hold_days" />
-                  </tr>
-                </thead>
-                <tbody>
+            <TableContainer sx={{ overflow: "auto", height: "100%" }}>
+              <Table stickyHeader size="small" sx={{ minWidth: 1180 }}>
+                <TableHead><TableRow>
+                  <TableCell>Symbol</TableCell><TableCell sx={{ display: { xs: "none", md: "table-cell" } }}>Market</TableCell>
+                  <SortHeader label="Buy date" statKey="buy_date" /><TableCell align="right" sx={{ display: { xs: "none", sm: "table-cell" } }}>Buy price</TableCell><TableCell align="right" sx={{ display: { xs: "none", sm: "table-cell" } }}>Buy qty</TableCell><TableCell align="right" sx={{ display: { xs: "none", sm: "table-cell" } }}>Cost</TableCell>
+                  <SortHeader label="Sell date" statKey="sell_date" /><TableCell align="right" sx={{ display: { xs: "none", sm: "table-cell" } }}>Sell price</TableCell><TableCell align="right" sx={{ display: { xs: "none", sm: "table-cell" } }}>Sell qty</TableCell><TableCell align="right" sx={{ display: { xs: "none", sm: "table-cell" } }}>Proceeds</TableCell><TableCell align="right">P&amp;L</TableCell><SortHeader label="P&amp;L %" statKey="pnl_pct" /><SortHeader label="Hold" statKey="hold_days" />
+                </TableRow></TableHead>
+                <TableBody>
                   {filtered.map((rt, i) => {
                     const buySpan = groups.buyRowSpan[i];
                     const sellSpan = groups.sellRowSpan[i];
@@ -443,106 +391,38 @@ const [sortDesc, setSortDesc] = useState(true);
                     const buyQty = groups.buyGroupQty[i];
                     const sellQty = groups.sellGroupQty[i];
                     const isProfit = rt.pnl >= 0;
-                    const showSymbolBreak = symbolBreakIdx.has(i);
                     const sym = ccySymbol(rt.currency);
-
-                    // Subtle background tints: merged cells get a slightly darker tint to show
-                    // they span multiple rows
-                    const mergedBg = "bg-bg-soft";
-
                     return (
                       <>
-                        {showSymbolBreak && (
-                          <tr>
-                            <td colSpan={14} className="h-1 bg-line/30" />
-                          </tr>
-                        )}
-                        <tr
-                          key={i}
-                          className={`hover:bg-bg-soft/60 transition-colors border-b border-line ${i % 2 === 0 ? "" : "bg-bg-card/[0.04]"}`}
-                        >
-                          {/* Symbol — repeats per row but visually grouped via the break */}
-                          <td className="pl-3 sm:pl-5 pr-2 sm:pr-4 py-2.5 border-r border-line max-w-[120px] sm:max-w-[180px]">
-                            <div className="font-semibold leading-tight truncate">{rt.name || rt.symbol}</div>
-                            {rt.name && <div className="text-ink-faint text-sm leading-tight truncate tabular-nums">{rt.symbol}</div>}
-                          </td>
-                          <td className="px-3 py-2.5 text-ink-faint text-sm uppercase border-r border-line whitespace-nowrap tracking-wide hidden md:table-cell">
-                            {rt.market}
-                          </td>
-
-                          {/* BUY group — merged cells get subtle background + accent left border */}
-                          {buyMerged ? null : (
-                            <>
-                              <td className={`px-3 py-2.5 text-right tabular-nums whitespace-nowrap text-ink-dim border-l-2 border-accent border-r border-line ${mergedBg}`} rowSpan={buySpan}>
-                                <div className="text-sm">{fmtDate(rt.buy_date)}</div>
-                                <div className="text-ink-faint text-sm">×{buySpan} leg{buySpan > 1 ? "s" : ""}</div>
-                              </td>
-                              <td className={`px-3 py-2.5 text-right tabular-nums whitespace-nowrap border-r border-line ${mergedBg} hidden sm:table-cell`} rowSpan={buySpan}>
-                                <div className="text-ink-dim text-sm mb-0.5">{sym}</div>
-                                <div className="font-medium">{fmtNum(rt.buy_price, 2)}</div>
-                              </td>
-                              <td className={`px-3 py-2.5 text-right tabular-nums whitespace-nowrap border-r border-line ${mergedBg} hidden sm:table-cell`} rowSpan={buySpan}>
-                                <div className="font-medium">{fmtNum(buyQty, 0)}</div>
-                                <div className="text-ink-faint text-sm">shares</div>
-                              </td>
-                            </>
-                          )}
-
-                          {/* Per-row cost */}
-                          <td className="px-3 py-2.5 text-right tabular-nums whitespace-nowrap border-r border-line hidden sm:table-cell">
-                            <div className="text-ink-dim text-sm">{sym}</div>
-                            <div>{fmtNum(rt.cost, 2)}</div>
-                            <div className="text-ink-faint text-sm">({fmtNum(rt.quantity, 0)} sh)</div>
-                          </td>
-
-                          {/* SELL group */}
-                          {sellMerged ? null : (
-                            <>
-                              <td className={`px-3 py-2.5 text-right tabular-nums whitespace-nowrap text-ink-dim border-r border-line ${mergedBg}`} rowSpan={sellSpan}>
-                                <div className="text-sm">{fmtDate(rt.sell_date)}</div>
-                                <div className="text-ink-faint text-sm">×{sellSpan} leg{sellSpan > 1 ? "s" : ""}</div>
-                              </td>
-                              <td className={`px-3 py-2.5 text-right tabular-nums whitespace-nowrap border-r border-line ${mergedBg} hidden sm:table-cell`} rowSpan={sellSpan}>
-                                <div className="text-ink-dim text-sm mb-0.5">{sym}</div>
-                                <div className="font-medium">{fmtNum(rt.sell_price, 2)}</div>
-                              </td>
-                              <td className={`px-3 py-2.5 text-right tabular-nums whitespace-nowrap border-r border-line ${mergedBg} hidden sm:table-cell`} rowSpan={sellSpan}>
-                                <div className="font-medium">{fmtNum(sellQty, 0)}</div>
-                                <div className="text-ink-faint text-sm">shares</div>
-                              </td>
-                            </>
-                          )}
-
-                          {/* Per-row proceeds */}
-                          <td className="px-3 py-2.5 text-right tabular-nums whitespace-nowrap border-r border-line hidden sm:table-cell">
-                            <div className="text-ink-dim text-sm">{sym}</div>
-                            <div>{fmtNum(rt.proceeds, 2)}</div>
-                            <div className="text-ink-faint text-sm">({fmtNum(rt.quantity, 0)} sh)</div>
-                          </td>
-
-                          {/* P&L — highlighted */}
-                          <td className={`px-3 py-2.5 text-right tabular-nums whitespace-nowrap border-l-2 ${isProfit ? "border-good bg-good/10" : "border-bad bg-bad/10"} border-r border-line font-semibold`}>
-                            <div className={`flex items-center justify-end gap-1 ${isProfit ? "text-good" : "text-bad"}`}>
-                              {isProfit ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
-                              <span>{sym} {fmtNum(Math.abs(rt.pnl), 2)}</span>
-                            </div>
-                          </td>
-                          <td className={`px-3 py-2.5 text-right tabular-nums whitespace-nowrap border-r border-line ${isProfit ? "text-good" : "text-bad"}`}>
-                            {fmtPct(rt.pnl_pct, 1)}
-                          </td>
-                          <td className="px-3 sm:px-5 py-2.5 text-right tabular-nums whitespace-nowrap text-ink-faint text-sm">
-                            {formatHoldDays(rt.hold_days)}
-                          </td>
-                        </tr>
+                        {symbolBreakIdx.has(i) && <TableRow><TableCell colSpan={13} sx={{ height: 4, p: 0, bgcolor: "divider" }} /></TableRow>}
+                        <TableRow key={i} hover>
+                          <TableCell><Typography variant="body2" sx={{ fontWeight: 650 }}>{rt.name || rt.symbol}</Typography>{rt.name && <Typography variant="caption" color="text.secondary">{rt.symbol}</Typography>}</TableCell>
+                          <TableCell sx={{ display: { xs: "none", md: "table-cell" } }}><Chip size="small" label={rt.market} variant="outlined" /></TableCell>
+                          {!buyMerged && <>
+                            <TableCell rowSpan={buySpan} align="right" sx={{ color: "text.secondary", bgcolor: "action.hover", fontVariantNumeric: "tabular-nums" }}>{fmtDate(rt.buy_date)}<Typography variant="caption" sx={{ display: "block" }} color="text.secondary">×{buySpan} leg{buySpan > 1 ? "s" : ""}</Typography></TableCell>
+                            <TableCell rowSpan={buySpan} align="right" sx={{ display: { xs: "none", sm: "table-cell" }, bgcolor: "action.hover", fontVariantNumeric: "tabular-nums" }}>{sym}{fmtNum(rt.buy_price, 2)}</TableCell>
+                            <TableCell rowSpan={buySpan} align="right" sx={{ display: { xs: "none", sm: "table-cell" }, bgcolor: "action.hover", fontVariantNumeric: "tabular-nums" }}>{fmtNum(buyQty, 0)}<Typography variant="caption" sx={{ display: "block" }} color="text.secondary">shares</Typography></TableCell>
+                          </>}
+                          <TableCell align="right" sx={{ display: { xs: "none", sm: "table-cell" }, fontVariantNumeric: "tabular-nums" }}>{sym}{fmtNum(rt.cost, 2)}<Typography variant="caption" sx={{ display: "block" }} color="text.secondary">{fmtNum(rt.quantity, 0)} sh</Typography></TableCell>
+                          {!sellMerged && <>
+                            <TableCell rowSpan={sellSpan} align="right" sx={{ color: "text.secondary", bgcolor: "action.hover", fontVariantNumeric: "tabular-nums" }}>{fmtDate(rt.sell_date)}<Typography variant="caption" sx={{ display: "block" }} color="text.secondary">×{sellSpan} leg{sellSpan > 1 ? "s" : ""}</Typography></TableCell>
+                            <TableCell rowSpan={sellSpan} align="right" sx={{ display: { xs: "none", sm: "table-cell" }, bgcolor: "action.hover", fontVariantNumeric: "tabular-nums" }}>{sym}{fmtNum(rt.sell_price, 2)}</TableCell>
+                            <TableCell rowSpan={sellSpan} align="right" sx={{ display: { xs: "none", sm: "table-cell" }, bgcolor: "action.hover", fontVariantNumeric: "tabular-nums" }}>{fmtNum(sellQty, 0)}<Typography variant="caption" sx={{ display: "block" }} color="text.secondary">shares</Typography></TableCell>
+                          </>}
+                          <TableCell align="right" sx={{ display: { xs: "none", sm: "table-cell" }, fontVariantNumeric: "tabular-nums" }}>{sym}{fmtNum(rt.proceeds, 2)}<Typography variant="caption" sx={{ display: "block" }} color="text.secondary">{fmtNum(rt.quantity, 0)} sh</Typography></TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 700, fontVariantNumeric: "tabular-nums" }}><Typography component="span" sx={{ color: isProfit ? "success.main" : "error.main", fontWeight: 700 }}>{isProfit ? "+" : "−"}{sym}{fmtNum(Math.abs(rt.pnl), 2)}</Typography></TableCell>
+                          <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}><Typography component="span" sx={{ color: isProfit ? "success.main" : "error.main" }}>{fmtPct(rt.pnl_pct, 1)}</Typography></TableCell>
+                          <TableCell align="right" sx={{ color: "text.secondary", whiteSpace: "nowrap" }}>{formatHoldDays(rt.hold_days)}</TableCell>
+                        </TableRow>
                       </>
                     );
                   })}
-                </tbody>
-              </table>
-            </div>
+                </TableBody>
+              </Table>
+            </TableContainer>
           )}
         />
-      </div>
-    </div>
+      </Card>
+    </Box>
   );
 }

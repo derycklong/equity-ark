@@ -1,12 +1,18 @@
 import { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { Alert, Box, Button, Card, CardContent, Checkbox, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Divider, IconButton, List, ListItem, ListItemText, MenuItem as MuiMenuItem, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TableSortLabel, TextField, ToggleButton, ToggleButtonGroup, Typography } from "@mui/material";
+import { alpha } from "@mui/material/styles";
+import ReceiptLongOutlined from "@mui/icons-material/ReceiptLongOutlined";
+import CloseRounded from "@mui/icons-material/CloseRounded";
 import { api } from "../lib/api";
-import { fmtNum, fmtDate, ccySymbol } from "../lib/utils";
+import { fmtMoney, fmtNum, fmtDate, ccySymbol } from "../lib/utils";
 import { Trash2, Plus, Pencil, X, ArrowUpDown, ArrowUp, ArrowDown, Check, Loader2, Save, Upload, AlertOctagon, CheckCircle2, AlertTriangle, Download, FileDown } from "lucide-react";
 import { qk, useTransactions, useInvalidateAll } from "../hooks/usePortfolio";
 import { LoadingScreen } from "../components/LoadingScreen";
 import MobileTable from "../components/MobileTable";
 import ToolbarOverflow from "../components/ToolbarOverflow";
+import PageHeader from "../components/ui/PageHeader";
+import MetricCard from "../components/ui/MetricCard";
 
 type Tx = {
   id: number | null;
@@ -170,20 +176,16 @@ function TxForm({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      {/* Backdrop — only close on direct click, not via child propagation */}
-      <div className="absolute inset-0 bg-black/60" onMouseDown={(e) => { if (e.target === e.currentTarget) onCancel(); }} />
-      <div className="relative rounded-lg border border-line bg-bg-card w-full max-w-md max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-line">
-                  <h2 className="text-sm font-semibold">{initial.symbol ? "Edit Transaction" : "Add Transaction"}</h2>
-          <button onClick={onCancel} className="text-ink-faint hover:text-ink"><X size={18} /></button>
-        </div>
+    <Dialog open onClose={onCancel} fullWidth maxWidth="sm" scroll="paper" slotProps={{ transition: { timeout: 0 } }}>
+      <DialogTitle sx={{ fontSize: "0.9375rem", fontWeight: 700 }}>
+        {initial.symbol ? "Edit transaction" : "Add transaction"}
+        <IconButton onClick={onCancel} aria-label="Close" size="small" sx={{ position: "absolute", right: 12, top: 10 }}><CloseRounded fontSize="small" /></IconButton>
+      </DialogTitle>
+      <DialogContent dividers sx={{ p: { xs: 1.5, sm: 2 }, bgcolor: "background.default" }}>
         {error && (
-          <div className="mx-4 mt-3 rounded-md bg-bad/10 border border-bad/20 text-bad text-sm px-3 py-2">
-            {error}
-          </div>
+          <Alert severity="error" variant="outlined" sx={{ mb: 1.5 }}>{error}</Alert>
         )}
-        <div className="p-4 space-y-3">
+        <div className="material-legacy-form space-y-3">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-sm text-ink-faint mb-1">Date</label>
@@ -393,8 +395,8 @@ function TxForm({
             </div>
           </div>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -460,19 +462,33 @@ export default function Transactions() {
     return sortAsc ? <ArrowUp size={12} className="text-brand" /> : <ArrowDown size={12} className="text-brand" />;
   };
 
-  const toggleSelectAll = () => {
+  const toggleSelectAll = useCallback(() => {
     if (selected.size === sorted.length) setSelected(new Set());
     else setSelected(new Set(sorted.map((t) => t.id!).filter(Boolean)));
-  };
+  }, [selected.size, sorted]);
 
-  const handleDeleteOne = async (tx: Tx) => {
+  const toggleSelected = useCallback((id: number) => {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const handleDeleteOne = useCallback(async (tx: Tx) => {
     if (!confirm(`Delete ${tx.side} ${tx.quantity} ${tx.symbol} on ${tx.date}?`)) return;
     if (!tx.id) return;
     try {
       await api.deleteTransaction(tx.id);
       invalidateAll();
     } catch (e: any) { console.error(e); }
-  };
+  }, [invalidateAll]);
+
+  const handleEdit = useCallback((tx: Tx) => {
+    setFormError(null);
+    setModal({ edit: tx });
+  }, []);
 
   const handleBulkDelete = async () => {
     const ids = [...selected].filter(Boolean);
@@ -612,11 +628,28 @@ export default function Transactions() {
         label: form.label.trim(),
         note: form.note.trim(),
       };
-      if (modal && typeof modal === "object" && "edit" in modal && modal.edit.id) {
-        await api.updateTransaction(modal.edit.id, payload);
-      } else {
-        await api.addTransaction(payload);
+      const editId = modal && typeof modal === "object" && "edit" in modal ? modal.edit.id : null;
+      const isEdit = !!editId;
+      const saved = isEdit
+        ? await api.updateTransaction(editId, payload)
+        : await api.addTransaction(payload);
+
+      // Put the saved row into the active query immediately. The backend
+      // refreshes prices/dividends in the background, so the table should not
+      // wait for that slower work or a second round-trip to display the row.
+      if (saved.transaction) {
+        qc.setQueryData<{ transactions: Tx[]; count: number }>(qk.transactions, (current) => {
+          if (!current) return current;
+          const withoutSaved = current.transactions.filter((t) => t.id !== saved.transaction.id);
+          const transactions = [saved.transaction as Tx, ...withoutSaved]
+            .sort((a, b) => b.date.localeCompare(a.date));
+          return {
+            transactions,
+            count: isEdit ? current.count : current.count + 1,
+          };
+        });
       }
+
       setModal(null);
       invalidateAll();
     } catch (err: any) {
@@ -635,32 +668,19 @@ export default function Transactions() {
   const symbols = new Set(txs.map((t) => t.symbol));
 
   return (
-    <div className="space-y-4">
-      {/* Header + Stats */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">Transactions</h1>
-          <p className="text-ink-dim text-sm mt-1">
-            {txs.length} transactions · {symbols.size} symbols · {buyCount} buys · {sellCount} sells · S${totalInvested.toLocaleString("en-US", { maximumFractionDigits: 0 })} invested
-          </p>
-        </div>
-        <ToolbarOverflow
-          primary={
-            <>
-              {selected.size > 0 && (
-                <button onClick={handleBulkDelete} disabled={deleting}
-                  className="flex items-center gap-1.5 rounded-md border border-bad/40 bg-bad/10 text-bad px-3 py-1.5 text-sm font-medium hover:bg-bad/20 disabled:opacity-60">
-                  {deleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-                  Delete {selected.size}
-                </button>
-              )}
-              <button onClick={() => { setFormError(null); setModal("add"); }}
-                className="flex items-center gap-1.5 rounded-md border border-good/40 bg-good/10 text-good px-3 py-1.5 text-sm font-medium hover:bg-good/20">
-                <Plus size={14} />
-                Add
-              </button>
-            </>
-          }
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      <PageHeader
+        title="Transactions"
+        icon={<ReceiptLongOutlined />}
+        subtitle={`${txs.length} transactions · ${symbols.size} symbols · ${buyCount} buys · ${sellCount} sells`}
+        actions={
+          <ToolbarOverflow
+            primary={
+              <>
+                {selected.size > 0 && <Button size="small" color="error" variant="outlined" onClick={handleBulkDelete} disabled={deleting} startIcon={deleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}>Delete {selected.size}</Button>}
+                <Button size="small" color="success" variant="contained" onClick={() => { setFormError(null); setModal("add"); }} startIcon={<Plus size={14} />} sx={{ flex: { xs: 1, sm: "initial" }, minWidth: 0, whiteSpace: "nowrap" }}>Add transaction</Button>
+              </>
+            }
           secondary={
             <>
               <MenuItem
@@ -683,175 +703,124 @@ export default function Transactions() {
               />
             </>
           }
-        />
-      </div>
+          />
+        }
+      />
+
+      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2, 1fr)", md: "repeat(4, 1fr)" }, gap: 1.5 }}>
+        <MetricCard label="Transactions" value={txs.length} supporting={`${filtered.length} match current filters`} tone="primary" icon={<ReceiptLongOutlined fontSize="small" />} />
+        <MetricCard label="Symbols" value={symbols.size} supporting="unique instruments" />
+        <MetricCard label="Buys / sells" value={`${buyCount} / ${sellCount}`} supporting="recorded trade legs" />
+        <MetricCard label="Invested" value={fmtMoney(totalInvested, BASE_CCY)} supporting="estimated SGD base" tone="primary" />
+      </Box>
 
       {/* Filters */}
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:flex-wrap">
-        <input
+      <Card variant="outlined">
+        <CardContent sx={{ p: { xs: 1.25, sm: 1.5 }, "&:last-child": { pb: { xs: 1.25, sm: 1.5 } } }}>
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ alignItems: { xs: "stretch", sm: "center" }, flexWrap: "wrap" }}>
+        <TextField
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search symbol, name, note…"
-          className="rounded-md border border-line bg-bg-card px-3 py-1.5 text-sm w-full sm:w-56"
+          label="Search"
+          placeholder="Symbol, name, note"
+          size="small"
+          sx={{ width: { xs: "100%", sm: 230 } }}
         />
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex gap-1 text-sm">
-            {["", "buy", "sell"].map((s) => (
-              <button key={s} onClick={() => setSideFilter(s)}
-                className={`px-2 py-1 rounded ${sideFilter === s ? "bg-brand text-white" : "text-ink-dim hover:text-ink bg-bg-card border border-line"}`}>
-                {s || "All"}
-              </button>
-            ))}
-          </div>
-          <select value={ccyFilter} onChange={(e) => setCcyFilter(e.target.value)}
-            className="rounded-md border border-line bg-bg-card px-2 py-1.5 text-sm">
-            <option value="">All currencies</option>
-            {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
+        <ToggleButtonGroup size="small" fullWidth exclusive value={sideFilter} onChange={(_, value) => setSideFilter(value || "")} aria-label="Transaction side filter" sx={{ width: { xs: "100%", sm: "auto" }, "& .MuiToggleButton-root": { flex: { xs: 1, sm: "initial" } } }}>
+          <ToggleButton value="">All</ToggleButton><ToggleButton value="buy" color="success">Buy</ToggleButton><ToggleButton value="sell" color="error">Sell</ToggleButton>
+        </ToggleButtonGroup>
+        <TextField select size="small" label="Currency" value={ccyFilter} onChange={(e) => setCcyFilter(e.target.value)} sx={{ width: { xs: "100%", sm: 130 } }}>
+          <MuiMenuItem value="">All currencies</MuiMenuItem>
+          {CURRENCIES.map((currency) => <MuiMenuItem key={currency} value={currency}>{currency}</MuiMenuItem>)}
+        </TextField>
           {search || sideFilter || ccyFilter ? (
-            <button onClick={() => { setSearch(""); setSideFilter(""); setCcyFilter(""); }}
-              className="text-sm text-ink-faint hover:text-ink">
-              Clear filters
-            </button>
+            <Button size="small" color="inherit" onClick={() => { setSearch(""); setSideFilter(""); setCcyFilter(""); }}>Clear filters</Button>
           ) : null}
-        </div>
-        <div className="text-sm text-ink-faint sm:ml-auto">{filtered.length} shown</div>
-      </div>
+          <Typography variant="caption" color="text.secondary" sx={{ ml: { sm: "auto" } }}>{filtered.length} shown</Typography>
+          </Stack>
+        </CardContent>
+      </Card>
 
       {/* Table + mobile card list */}
-      <MobileTable
+      {!modal && <Card variant="outlined" sx={{ overflow: "hidden", borderColor: { xs: "transparent", md: "divider" }, bgcolor: { xs: "transparent", md: "background.paper" } }}><MobileTable
         items={sorted}
         keyOf={(t) => t.id ?? `${t.symbol}-${t.date}-${t.quantity}`}
         empty="No transactions match the current filters."
-        renderCard={(t) => (
-          <div className={`rounded-lg border border-line bg-bg-card p-3 ${selected.has(t.id!) ? "ring-1 ring-brand/40" : ""}`}>
-            <div className="flex items-start justify-between gap-2">
-              <label className="flex items-start gap-2 min-w-0 flex-1">
-                <input
-                  type="checkbox"
-                  checked={selected.has(t.id!)}
-                  onChange={() => {
-                    const next = new Set(selected);
-                    if (next.has(t.id!)) next.delete(t.id!);
-                    else next.add(t.id!);
-                    setSelected(next);
-                  }}
-                  className="rounded mt-1 shrink-0"
-                />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-baseline gap-2 flex-wrap">
-                    <span className="font-medium truncate leading-tight">{t.name || t.symbol}</span>
-                    {t.name && <span className="text-ink-faint text-sm tabular-nums truncate">{t.symbol}</span>}
-                    <span className={`text-xs font-semibold uppercase ${t.side === "buy" ? "text-good" : "text-bad"}`}>
-                      {t.side}
-                    </span>
-                  </div>
-                  <div className="text-xs text-ink-faint tabular-nums mt-0.5">
-                    {fmtDate(t.date)} · {t.exchange} · {t.currency}
-                  </div>
-                </div>
-              </label>
-              <div className="flex items-center gap-1 shrink-0">
-                <button
-                  onClick={() => { setFormError(null); setModal({ edit: t }); }}
-                  className="p-1.5 rounded text-ink-faint hover:text-ink hover:bg-bg-soft"
-                  title="Edit"
-                >
-                  <Pencil size={14} />
-                </button>
-                <button
-                  onClick={() => handleDeleteOne(t)}
-                  className="p-1.5 rounded text-ink-faint hover:text-bad hover:bg-bad/10"
-                  title="Delete"
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
-            </div>
-            <div className="mt-2 grid grid-cols-3 gap-2 text-sm">
-              <Mini label="Qty" value={fmtNum(t.quantity, 2)} />
-              <Mini label="Price" value={fmtNum(t.price, 4)} />
-              <Mini label="Gross" value={`${ccySymbol(t.currency)}${fmtNum(t.gross_amount, 2)}`} align="right" />
-            </div>
-            {t.note && (
-              <div className="mt-1.5 text-xs text-ink-faint truncate">{t.note}</div>
-            )}
-          </div>
-        )}
+        renderCard={(t) => {
+          const isBuy = t.side === "buy";
+          const isSelected = selected.has(t.id!);
+          return (
+          <Card variant="outlined" sx={{ borderColor: isSelected ? "primary.main" : "divider", borderWidth: isSelected ? 2 : 1 }}>
+            <CardContent sx={{ p: 1.25, "&:last-child": { pb: 1.25 } }}>
+              <Stack direction="row" sx={{ alignItems: "flex-start", gap: 0.75 }}>
+                <Checkbox size="small" checked={isSelected} sx={{ p: 0.25, mt: 0.1 }} onChange={() => toggleSelected(t.id!)} slotProps={{ input: { "aria-label": `Select ${t.symbol}` } }} />
+                <Box sx={{ minWidth: 0, flex: 1 }}>
+                  <Stack direction="row" spacing={0.6} sx={{ alignItems: "center", minWidth: 0 }}>
+                    <Typography variant="body2" sx={{ fontWeight: 750 }} noWrap>{t.symbol}</Typography>
+                    <Chip size="small" label={isBuy ? "Buy" : "Sell"} color={isBuy ? "success" : "error"} variant="outlined" sx={{ height: 21, fontSize: "0.66rem", fontWeight: 700, "& .MuiChip-label": { px: 0.8 } }} />
+                  </Stack>
+                  <Typography variant="caption" color="text.secondary" noWrap sx={{ display: "block", mt: 0.2 }}>{t.name || `${t.exchange} · ${t.currency}`} · {fmtDate(t.date)}</Typography>
+                </Box>
+                <Box sx={{ minWidth: 0, textAlign: "right", flexShrink: 0 }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" }}>Gross</Typography>
+                  <Typography variant="body2" sx={{ color: isBuy ? "success.main" : "error.main", fontWeight: 750, fontVariantNumeric: "tabular-nums" }} noWrap>{ccySymbol(t.currency)}{fmtNum(t.gross_amount, 2)}</Typography>
+                </Box>
+                <Stack direction="row" sx={{ flexShrink: 0, ml: 0.25 }}>
+                  <IconButton size="small" title="Edit" aria-label={`Edit ${t.symbol}`} sx={{ minWidth: 30, minHeight: 30, p: 0.5 }} onClick={() => handleEdit(t)}><Pencil size={15} /></IconButton>
+                  <IconButton size="small" title="Delete" aria-label={`Delete ${t.symbol}`} color="error" sx={{ minWidth: 30, minHeight: 30, p: 0.5 }} onClick={() => handleDeleteOne(t)}><Trash2 size={15} /></IconButton>
+                </Stack>
+              </Stack>
+              <Divider sx={{ my: 1 }} />
+              <Box sx={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 1 }}>
+                <TxMetric label="Quantity" value={fmtNum(t.quantity, 2)} />
+                <TxMetric label="Price" value={fmtNum(t.price, 4)} />
+                <TxMetric label="Fees" value={`${ccySymbol(t.currency)}${fmtNum(t.fees, 2)}`} />
+              </Box>
+              {t.note && <Typography variant="caption" color="text.secondary" noWrap sx={{ display: "block", mt: 0.9, pt: 0.75, borderTop: 1, borderColor: "divider" }}>{t.note}</Typography>}
+            </CardContent>
+          </Card>
+          );
+        }}
         renderTable={() => (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="text-ink-faint text-sm uppercase bg-bg-soft border-b border-line">
-                <tr>
-                  <th className="w-8 px-3 py-2">
-                    <input type="checkbox" checked={selected.size === sorted.length && sorted.length > 0}
-                      onChange={toggleSelectAll} className="rounded" />
-                  </th>
-                  {(["date", "symbol", "side", "currency", "quantity", "price", "gross_amount"] as SortKey[]).map((k) => {
-                    const hideOnMobile = k === "currency" || k === "quantity" || k === "price";
+          <TableContainer sx={{ overflowX: "auto" }}>
+            <Table size="small" sx={{ minWidth: 900 }}>
+              <TableHead>
+                <TableRow>
+                  <TableCell padding="checkbox"><Checkbox size="small" checked={selected.size === sorted.length && sorted.length > 0} indeterminate={selected.size > 0 && selected.size < sorted.length} onChange={toggleSelectAll} /></TableCell>
+                  {(["date", "symbol", "side", "currency", "quantity", "price", "gross_amount"] as SortKey[]).map((key) => {
+                    const hiddenOnSmall = key === "quantity" || key === "price";
+                    const hiddenOnMedium = key === "currency";
+                    const label = key === "gross_amount" ? "Gross" : key;
                     return (
-                      <th key={k}
-                        className={`px-3 py-2 font-medium cursor-pointer select-none hover:text-ink ${k === "gross_amount" ? "text-right" : "text-left"} ${hideOnMobile ? "hidden sm:table-cell" : ""} ${k === "currency" ? "hidden md:table-cell" : ""}`}
-                        onClick={() => toggleSort(k)}>
-                        <span className="inline-flex items-center gap-1">
-                          {k === "gross_amount" ? "Gross" : k}
-                          <SortIcon k={k} />
-                        </span>
-                      </th>
+                      <TableCell key={key} align={key === "gross_amount" || ["quantity", "price"].includes(key) ? "right" : "left"} sx={{ display: hiddenOnMedium ? { xs: "none", md: "table-cell" } : hiddenOnSmall ? { xs: "none", sm: "table-cell" } : undefined }}>
+                        <TableSortLabel active={sortKey === key} direction={sortKey === key ? (sortAsc ? "asc" : "desc") : "asc"} onClick={() => toggleSort(key)}>{label}</TableSortLabel>
+                      </TableCell>
                     );
                   })}
-                  <th className="text-left px-3 py-2 font-medium hidden md:table-cell">Note</th>
-                  <th className="w-16 px-3 py-2"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-line/50">
+                  <TableCell sx={{ display: { xs: "none", md: "table-cell" } }}>Note</TableCell>
+                  <TableCell padding="checkbox" />
+                </TableRow>
+              </TableHead>
+              <TableBody>
                 {sorted.map((t) => (
-                  <tr key={t.id || `${t.symbol}-${t.date}-${t.quantity}`}
-                    className={`hover:bg-bg-soft transition-colors ${selected.has(t.id!) ? "bg-brand/5" : ""}`}>
-                    <td className="px-3 py-1.5">
-                      <input type="checkbox" checked={selected.has(t.id!)}
-                        onChange={() => {
-                          const next = new Set(selected);
-                          if (next.has(t.id!)) next.delete(t.id!);
-                          else next.add(t.id!);
-                          setSelected(next);
-                        }} className="rounded" />
-                    </td>
-                    <td className="px-3 py-1.5 text-ink-dim whitespace-nowrap tabular-nums text-sm">{fmtDate(t.date)}</td>
-                    <td className="px-3 py-1.5">
-                      <div className="font-medium whitespace-nowrap leading-tight">{t.name || t.symbol}</div>
-                      {t.name && <div className="text-ink-faint text-sm leading-tight truncate max-w-[160px] tabular-nums">{t.symbol}</div>}
-                    </td>
-                    <td className={`px-3 py-1.5 text-sm font-medium uppercase whitespace-nowrap ${t.side === "buy" ? "text-good" : "text-bad"}`}>
-                      {t.side}
-                    </td>
-                    <td className="px-3 py-1.5 text-ink-faint text-sm font-medium hidden sm:table-cell">{t.currency}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap hidden sm:table-cell">{fmtNum(t.quantity, 2)}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap hidden sm:table-cell">{fmtNum(t.price, 4)}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">
-                      <span className="text-ink-dim text-sm">{ccySymbol(t.currency)}</span>
-                      {fmtNum(t.gross_amount, 2)}
-                    </td>
-                    <td className="px-3 py-1.5 text-ink-faint text-sm truncate max-w-[120px] hidden md:table-cell">{t.note || ""}</td>
-                    <td className="px-3 py-1.5">
-                      <div className="flex items-center gap-1">
-                        <button onClick={() => { setFormError(null); setModal({ edit: t }); }}
-                          className="p-1.5 rounded text-ink-faint hover:text-ink hover:bg-bg-soft" title="Edit">
-                          <Pencil size={13} />
-                        </button>
-                        <button onClick={() => handleDeleteOne(t)}
-                          className="p-1.5 rounded text-ink-faint hover:text-bad hover:bg-bad/10" title="Delete">
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
+                  <TableRow key={t.id || `${t.symbol}-${t.date}-${t.quantity}`} hover selected={selected.has(t.id!)}>
+                    <TableCell padding="checkbox"><Checkbox size="small" checked={selected.has(t.id!)} onChange={() => toggleSelected(t.id!)} /></TableCell>
+                    <TableCell sx={{ color: "text.secondary", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{fmtDate(t.date)}</TableCell>
+                    <TableCell><Typography variant="body2" sx={{ fontWeight: 650, whiteSpace: "nowrap" }}>{t.name || t.symbol}</Typography>{t.name && <Typography variant="caption" color="text.secondary">{t.symbol}</Typography>}</TableCell>
+                    <TableCell><Chip size="small" label={t.side === "buy" ? "Buy" : "Sell"} color={t.side === "buy" ? "success" : "error"} variant="outlined" /></TableCell>
+                    <TableCell sx={{ display: { xs: "none", sm: "table-cell" }, color: "text.secondary" }}>{t.currency}</TableCell>
+                    <TableCell align="right" sx={{ display: { xs: "none", sm: "table-cell" }, fontVariantNumeric: "tabular-nums" }}>{fmtNum(t.quantity, 2)}</TableCell>
+                    <TableCell align="right" sx={{ display: { xs: "none", sm: "table-cell" }, fontVariantNumeric: "tabular-nums" }}>{fmtNum(t.price, 4)}</TableCell>
+                    <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}><Typography component="span" variant="caption" color="text.secondary">{ccySymbol(t.currency)}</Typography>{fmtNum(t.gross_amount, 2)}</TableCell>
+                    <TableCell sx={{ display: { xs: "none", md: "table-cell" }, maxWidth: 160 }}><Typography variant="body2" color="text.secondary" noWrap>{t.note || ""}</Typography></TableCell>
+                    <TableCell padding="checkbox"><Stack direction="row"><IconButton size="small" title="Edit" onClick={() => handleEdit(t)}><Pencil size={15} /></IconButton><IconButton size="small" title="Delete" color="error" onClick={() => handleDeleteOne(t)}><Trash2 size={15} /></IconButton></Stack></TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </TableBody>
+            </Table>
+          </TableContainer>
         )}
-      />
+      /></Card>}
 
       {/* Modal */}
       {modal && (
@@ -877,7 +846,7 @@ export default function Transactions() {
 
       {/* Fund Aliases management modal */}
       {showManageAliases && (
-        <FundAliasManager
+        <MaterialFundAliasManager
           aliases={fundAliases}
           onDelete={async (alias) => { await api.deleteFundAlias(alias); const r = await api.listFundAliases(); setFundAliases(r.aliases); }}
           onClose={() => setShowManageAliases(false)}
@@ -886,34 +855,24 @@ export default function Transactions() {
 
       {/* Upload result modal */}
       {uploadResult && (
-        <UploadResultModal
+        <MaterialUploadResultModal
           result={uploadResult}
           onClose={() => setUploadResult(null)}
         />
       )}
 
       {/* Upload error modal */}
-      {uploadError && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/60" onClick={() => setUploadError(null)} />
-          <div className="relative rounded-lg border border-bad/40 bg-bg-card w-full max-w-sm p-5 shadow-xl">
-            <div className="flex items-center gap-2 mb-2">
-              <AlertOctagon size={18} className="text-bad" />
-              <h2 className="text-sm font-semibold text-bad">Upload failed</h2>
-            </div>
-            <p className="text-sm text-ink-dim mb-4">{uploadError}</p>
-            <div className="flex justify-end">
-              <button
-                onClick={() => setUploadError(null)}
-                className="rounded-md border border-line bg-bg-soft px-3 py-1.5 text-sm hover:border-ink-dim"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+      {uploadError && <UploadErrorDialog message={uploadError} onClose={() => setUploadError(null)} />}
+    </Box>
+  );
+}
+
+function TxMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <Box sx={{ minWidth: 0 }}>
+      <Typography variant="caption" color="text.secondary" sx={{ display: "block", fontSize: "0.62rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" }} noWrap>{label}</Typography>
+      <Typography variant="body2" sx={{ mt: 0.15, fontWeight: 650, fontVariantNumeric: "tabular-nums" }} noWrap>{value}</Typography>
+    </Box>
   );
 }
 
@@ -928,28 +887,19 @@ function MenuItem({
   label: string;
   title?: string;
 }) {
-  // Renders as a desktop inline button on md+ and as a full-width row item
-  // inside the mobile dropdown (ToolbarOverflow wraps these in a column).
   return (
     <>
-      <button
+      <Button
         type="button"
         onClick={onClick}
         title={title}
-        className="hidden md:flex items-center gap-1.5 rounded-md border border-line bg-bg-card text-ink-dim px-3 py-1.5 text-sm font-medium hover:text-ink"
+        variant="text"
+        color="inherit"
+        startIcon={icon}
+        sx={{ width: "100%", justifyContent: "flex-start", textAlign: "left", gap: 0.5, minHeight: 44, px: 1.5, borderRadius: 1, color: "text.primary", "& .MuiButton-startIcon": { color: "text.secondary", mr: 0.75 } }}
       >
-        {icon}
         {label}
-      </button>
-      <button
-        type="button"
-        onClick={onClick}
-        title={title}
-        className="md:hidden flex items-center gap-2 w-full text-left px-3 py-2 text-sm text-ink hover:bg-bg-soft"
-      >
-        <span className="text-ink-dim">{icon}</span>
-        <span>{label}</span>
-      </button>
+      </Button>
     </>
   );
 }
@@ -962,22 +912,10 @@ function UploadMenuItem({
   onUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
 }) {
   return (
-    <>
-      <label
-        className={`hidden md:flex items-center gap-1.5 rounded-md border border-line bg-bg-card text-ink-dim px-3 py-1.5 text-sm font-medium hover:text-ink cursor-pointer ${uploading ? "opacity-60 pointer-events-none" : ""}`}
-      >
-        {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+      <Button component="label" variant="text" color="inherit" disabled={uploading} startIcon={uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />} sx={{ width: "100%", justifyContent: "flex-start", textAlign: "left", gap: 0.5, minHeight: 44, px: 1.5, borderRadius: 1, color: "text.primary", "& .MuiButton-startIcon": { color: "text.secondary", mr: 0.75 } }}>
         {uploading ? "Uploading…" : "Upload CSV"}
         <input type="file" accept=".csv" hidden disabled={uploading} onChange={onUpload} />
-      </label>
-      <label
-        className={`md:hidden flex items-center gap-2 w-full text-left px-3 py-2 text-sm text-ink hover:bg-bg-soft cursor-pointer ${uploading ? "opacity-60 pointer-events-none" : ""}`}
-      >
-        <span className="text-ink-dim">{uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}</span>
-        <span>{uploading ? "Uploading…" : "Upload CSV"}</span>
-        <input type="file" accept=".csv" hidden disabled={uploading} onChange={onUpload} />
-      </label>
-    </>
+      </Button>
   );
 }
 
@@ -990,6 +928,65 @@ function Mini({ label, value, align = "left" }: { label: string; value: string; 
   );
 }
 
+
+function MaterialFundAliasManager({ aliases, onDelete, onClose }: {
+  aliases: { alias: string; isin: string; fund_name: string }[];
+  onDelete: (alias: string) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [deleting, setDeleting] = useState<string | null>(null);
+  return (
+    <Dialog open fullWidth maxWidth="sm" onClose={onClose} scroll="paper">
+      <DialogTitle sx={{ fontWeight: 700, fontSize: "0.95rem" }}>
+        Saved funds
+        <IconButton onClick={onClose} aria-label="Close" size="small" sx={{ position: "absolute", right: 12, top: 10 }}><CloseRounded fontSize="small" /></IconButton>
+      </DialogTitle>
+      <DialogContent dividers sx={{ p: 0 }}>
+        {aliases.length === 0 ? <Typography color="text.secondary" align="center" sx={{ py: 5 }}>No saved funds yet.</Typography> : (
+          <List disablePadding>
+            {aliases.map((a) => (
+              <ListItem key={a.alias} divider secondaryAction={<IconButton edge="end" color="error" aria-label={`Delete ${a.alias}`} disabled={deleting === a.alias} onClick={async () => { setDeleting(a.alias); await onDelete(a.alias); setDeleting(null); }}>{deleting === a.alias ? <Loader2 size={16} className="spin-icon" /> : <Trash2 size={16} />}</IconButton>}>
+                <ListItemText primary={<Typography variant="body2" sx={{ fontWeight: 700 }}>{a.alias}</Typography>} secondary={<Typography variant="body2" color="text.secondary" noWrap>{a.isin} · {a.fund_name}</Typography>} />
+              </ListItem>
+            ))}
+          </List>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function MaterialUploadResultModal({ result, onClose }: {
+  result: { fileName: string; imported: number; skipped: number; errors: string[] };
+  onClose: () => void;
+}) {
+  const allOk = result.skipped === 0;
+  const Icon = allOk ? CheckCircle2 : result.imported > 0 ? AlertTriangle : AlertOctagon;
+  const tone = allOk ? "success.main" : result.imported > 0 ? "warning.main" : "error.main";
+  return (
+    <Dialog open fullWidth maxWidth="sm" onClose={onClose} scroll="paper">
+      <DialogTitle sx={{ display: "flex", alignItems: "center", gap: 1, fontWeight: 700, fontSize: "0.95rem" }}>
+        <Box sx={{ display: "flex", color: tone }}><Icon size={19} /></Box>
+        {allOk ? "Upload complete" : result.imported > 0 ? "Upload finished with warnings" : "Upload failed"}
+        <IconButton onClick={onClose} aria-label="Close" size="small" sx={{ position: "absolute", right: 12, top: 10 }}><CloseRounded fontSize="small" /></IconButton>
+      </DialogTitle>
+      <DialogContent dividers>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2, overflowWrap: "anywhere" }}>{result.fileName}</Typography>
+        <Box sx={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 1 }}>
+          <Card variant="outlined" sx={{ bgcolor: result.imported > 0 ? (theme) => alpha(theme.palette.success.main, 0.08) : "action.hover" }}><CardContent sx={{ p: 1.5, "&:last-child": { pb: 1.5 } }}><Typography variant="caption" color="text.secondary">IMPORTED</Typography><Typography variant="h2" color={result.imported > 0 ? "success.main" : "text.secondary"} sx={{ mt: 0.25 }}>{result.imported}</Typography><Typography variant="caption" color="text.secondary">transactions added</Typography></CardContent></Card>
+          <Card variant="outlined" sx={{ bgcolor: result.skipped > 0 ? (theme) => alpha(theme.palette.error.main, 0.08) : "action.hover" }}><CardContent sx={{ p: 1.5, "&:last-child": { pb: 1.5 } }}><Typography variant="caption" color="text.secondary">SKIPPED</Typography><Typography variant="h2" color={result.skipped > 0 ? "error.main" : "text.secondary"} sx={{ mt: 0.25 }}>{result.skipped}</Typography><Typography variant="caption" color="text.secondary">rows with errors</Typography></CardContent></Card>
+        </Box>
+        {result.errors.length > 0 && <Alert severity="warning" variant="outlined" sx={{ mt: 2, maxHeight: 220, overflow: "auto" }}><Typography variant="body2" sx={{ fontWeight: 700, mb: 0.5 }}>Skipped rows</Typography><Stack component="ul" spacing={0.5} sx={{ m: 0, pl: 2 }}>{result.errors.map((error, index) => <Typography component="li" variant="caption" key={index}>{error}</Typography>)}</Stack>{result.skipped > result.errors.length && <Typography variant="caption" sx={{ display: "block", mt: 1 }}>…and {result.skipped - result.errors.length} more.</Typography>}</Alert>}
+        {allOk && <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>All rows imported successfully.</Typography>}
+      </DialogContent>
+      <DialogActions><Button onClick={onClose}>Close</Button></DialogActions>
+    </Dialog>
+  );
+}
+
+function UploadErrorDialog({ message, onClose }: { message: string; onClose: () => void }) {
+  return <Dialog open fullWidth maxWidth="xs" onClose={onClose}><DialogTitle sx={{ display: "flex", alignItems: "center", gap: 1, color: "error.main", fontWeight: 700, fontSize: "0.95rem" }}><AlertOctagon size={18} />Upload failed</DialogTitle><DialogContent><Typography variant="body2" color="text.secondary" sx={{ overflowWrap: "anywhere" }}>{message}</Typography></DialogContent><DialogActions><Button onClick={onClose}>Close</Button></DialogActions></Dialog>;
+}
 
 function FundAliasManager({ aliases, onDelete, onClose }: {
   aliases: { alias: string; isin: string; fund_name: string }[];
@@ -1055,7 +1052,7 @@ function UploadResultModal({ result, onClose }: {
 
         <div className="p-5 space-y-4 overflow-y-auto">
           <div className="text-sm text-ink-dim">
-            <span className="font-mono text-ink">{result.fileName}</span>
+            <span className="text-ink">{result.fileName}</span>
           </div>
 
           <div className="grid grid-cols-2 gap-2">
@@ -1085,7 +1082,7 @@ function UploadResultModal({ result, onClose }: {
                   {result.errors.map((e, i) => (
                     <li key={i} className="px-3 py-1.5 text-sm text-ink-dim flex gap-2">
                       <span className="text-bad shrink-0">•</span>
-                      <span className="font-mono text-xs leading-snug">{e}</span>
+                      <span className="text-xs leading-snug">{e}</span>
                     </li>
                   ))}
                 </ul>

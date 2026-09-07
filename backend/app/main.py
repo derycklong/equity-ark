@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from authlib.integrations.starlette_client import OAuth
-from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, Response, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Query, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from itsdangerous import BadSignature, URLSafeSerializer
@@ -607,16 +607,29 @@ def _refresh_dashboard_cache(store: PortfolioStore) -> None:
 
 
 @app.post("/api/portfolio/transactions")
-def portfolio_add_transaction(tx: TransactionInput, store: PortfolioStore = Depends(get_user_store)) -> dict:
-    """Add a single transaction. Automatically rebuilds FIFO and dividends for new symbols."""
-    return store.add_transaction(tx.model_dump())
+def portfolio_add_transaction(
+    tx: TransactionInput,
+    background_tasks: BackgroundTasks,
+    store: PortfolioStore = Depends(get_user_store),
+) -> dict:
+    """Add a transaction quickly, then refresh live data after the response."""
+    result = store.add_transaction(tx.model_dump())
+    background_tasks.add_task(_refresh_dashboard_cache, store)
+    return result
 
 
 @app.put("/api/portfolio/transactions/{tx_id}")
-def portfolio_update_transaction(tx_id: int, tx: TransactionInput, store: PortfolioStore = Depends(get_user_store)) -> dict:
-    """Update an existing transaction by ID. Rebuilds all derived data."""
+def portfolio_update_transaction(
+    tx_id: int,
+    tx: TransactionInput,
+    background_tasks: BackgroundTasks,
+    store: PortfolioStore = Depends(get_user_store),
+) -> dict:
+    """Update a transaction quickly, then refresh live data after the response."""
     try:
-        return store.update_transaction(tx_id, tx.model_dump())
+        result = store.update_transaction(tx_id, tx.model_dump())
+        background_tasks.add_task(_refresh_dashboard_cache, store)
+        return result
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 

@@ -419,10 +419,14 @@ class PortfolioStore:
             gross = quantity * price
             net = gross - fees if tx_input["side"] == "buy" else gross + fees
 
-            # Fetch the company name (best-effort, does not block)
-            name = self._fetch_name(
-                tx_input["symbol"].upper(),
-                tx_input.get("exchange", "USX"),
+            # Company names are enriched by the background refresh after the
+            # save. Keep the write path local so a slow yfinance request does
+            # not delay the transaction response.
+            symbol_upper = tx_input["symbol"].upper()
+            name = next(
+                (getattr(t, "name", "") for t in self.transactions
+                 if t.symbol.upper() == symbol_upper and getattr(t, "name", "")),
+                "",
             )
 
             # New id = max(existing ids) + 1 (default 0 when no transactions)
@@ -446,15 +450,20 @@ class PortfolioStore:
                 name=name,
             )
             self.transactions.append(raw)
-            self._rebuild_from_transactions(refetch_symbols={raw.symbol.upper()})
+            self._rebuild_from_transactions(fetch_dividends=False, compute_profile_now=False)
 
-            return {
+            result = {
                 "added": raw.symbol,
                 "id": new_id,
                 "transactions": len(self.transactions),
                 "holdings": len(self.holdings),
                 "roundtrips": len(self.roundtrips),
             }
+            result["transaction"] = next(
+                (t for t in self.get_transactions() if t["id"] == new_id),
+                None,
+            )
+            return result
 
     def _fetch_name(self, symbol: str, exchange: str) -> str:
         """Best-effort: fetch the company name for a symbol via yfinance."""
@@ -492,11 +501,16 @@ class PortfolioStore:
             net = gross - fees if tx_input["side"] == "buy" else gross + fees
 
             new_symbol = tx_input["symbol"].upper()
-            # Refresh name if symbol changed or no name present
-            if new_symbol != target.symbol.upper() or not getattr(target, "name", ""):
-                name = self._fetch_name(new_symbol, tx_input.get("exchange", target.exchange))
-            else:
+            # Refresh names asynchronously after the write. Preserve a name
+            # already known in memory when the symbol is unchanged.
+            if new_symbol == target.symbol.upper() and getattr(target, "name", ""):
                 name = target.name
+            else:
+                name = next(
+                    (getattr(t, "name", "") for t in self.transactions
+                     if t is not target and t.symbol.upper() == new_symbol and getattr(t, "name", "")),
+                    "",
+                )
 
             target.date = date_obj
             target.side = tx_input["side"]
@@ -512,15 +526,20 @@ class PortfolioStore:
             target.note = tx_input.get("note", "")
             target.name = name
 
-            self._rebuild_from_transactions(refetch_symbols={target.symbol.upper()})
+            self._rebuild_from_transactions(fetch_dividends=False, compute_profile_now=False)
 
-            return {
+            result = {
                 "updated": tx_id,
                 "symbol": target.symbol,
                 "transactions": len(self.transactions),
                 "holdings": len(self.holdings),
                 "roundtrips": len(self.roundtrips),
             }
+            result["transaction"] = next(
+                (t for t in self.get_transactions() if t["id"] == tx_id),
+                None,
+            )
+            return result
 
     def delete_transaction(self, tx_id: int) -> dict:
         """Delete a single transaction by ID, rebuild derived data."""
@@ -577,7 +596,9 @@ class PortfolioStore:
             }
 
     def _rebuild_from_transactions(self, refetch_dividends: bool = False,
-                                     refetch_symbols: Optional[set] = None) -> None:
+                                     refetch_symbols: Optional[set] = None,
+                                     fetch_dividends: bool = True,
+                                     compute_profile_now: bool = True) -> None:
         """Common rebuild logic shared by add and delete.
         
         Args:
@@ -586,6 +607,12 @@ class PortfolioStore:
                 have no dividend events yet (newly added tickers).
             refetch_symbols: If set, re-fetch dividends for these specific symbols
                 even if they already have events (used when transactions change).
+            fetch_dividends: Whether to perform the network-backed dividend
+                fetch during this rebuild. Transaction writes skip this work
+                and the API schedules it after the response.
+            compute_profile_now: Whether to recalculate the FX/XIRR profile
+                during this rebuild. Transaction writes defer this work to
+                the same background refresh.
         """
         import time as _t
         t0 = _t.time()
@@ -609,7 +636,9 @@ class PortfolioStore:
         # Determine which symbols need dividend fetching
         existing_div_symbols = {e["symbol"].upper() for e in self.dividend_events}
         all_symbols = {t.symbol.upper() for t in self.transactions}
-        if refetch_dividends:
+        if not fetch_dividends:
+            need_fetch = set()
+        elif refetch_dividends:
             need_fetch = all_symbols
         else:
             # Fetch for new symbols + explicitly requested symbols
@@ -649,10 +678,11 @@ class PortfolioStore:
         self.dividend_summary = aggregate_dividends(self.dividend_events, self.holdings)
         self.dividends_by_symbol = dividends_to_holdings_map(self.dividend_events)
 
-        self.profile = compute_profile(
-            self.transactions, self.roundtrips, self.open_lots, self.dividends_by_symbol,
-            base_currency="SGD", fx_service=self.fx,
-        )
+        if compute_profile_now:
+            self.profile = compute_profile(
+                self.transactions, self.roundtrips, self.open_lots, self.dividends_by_symbol,
+                base_currency="SGD", fx_service=self.fx,
+            )
 
         self._persist_to_db()
         logger.info("_rebuild: fifo=%.2fs holdings=%.2fs total=%.2fs",

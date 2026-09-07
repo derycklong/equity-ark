@@ -1,265 +1,160 @@
-import { useMemo } from "react";
-import { Link } from "react-router-dom";
+import { useMemo, type ElementType } from "react";
+import { Box, Card, CardContent, Chip, Divider, Stack, Typography } from "@mui/material";
+import ArrowDownwardRounded from "@mui/icons-material/ArrowDownwardRounded";
+import ArrowUpwardRounded from "@mui/icons-material/ArrowUpwardRounded";
+import BriefcaseOutlined from "@mui/icons-material/BusinessCenterOutlined";
+import InsightsOutlined from "@mui/icons-material/InsightsOutlined";
+import PaidOutlined from "@mui/icons-material/PaidOutlined";
+import TrendingDownRounded from "@mui/icons-material/TrendingDownRounded";
+import TrendingUpRounded from "@mui/icons-material/TrendingUpRounded";
 import { fmtMoney, fmtPct } from "../lib/utils";
-import { ArrowUpRight, ArrowDownRight, TrendingUp, TrendingDown, Coins, Activity, Briefcase } from "lucide-react";
 import CurrencyPnL from "../components/CurrencyPnL";
 import NetWorthChart from "../components/dashboard/NetWorthChart";
 import { useDashboard } from "../hooks/usePortfolio";
 import { LoadingScreen } from "../components/LoadingScreen";
+import MetricCard from "../components/ui/MetricCard";
 
 function Pct({ p, digits = 1 }: { p: number | null | undefined; digits?: number }) {
-  if (p === null || p === undefined) return <span className="text-ink-faint">—</span>;
-  const good = p >= 0;
-  return <span className={good ? "text-good" : "text-bad"}>{fmtPct(p, digits)}</span>;
+  if (p === null || p === undefined) return <Typography component="span" color="text.disabled">—</Typography>;
+  return <Typography component="span" color={p >= 0 ? "success.main" : "error.main"} sx={{ fontVariantNumeric: "tabular-nums" }}>{fmtPct(p, digits)}</Typography>;
 }
 
 export default function Dashboard() {
   const { data, isLoading } = useDashboard();
-
-  // All hooks must be called unconditionally, before any early returns
   const holdings = data?.holdings || [];
-  // Split the 7-day movers into winners (top 3) and losers (bottom 3),
-  // instead of mixing them by absolute magnitude (which gave a noisy list).
-  const topMovers7d = useMemo(
-    () => [...holdings]
-      .filter((h: any) => h.change_pct_7d !== null && h.change_pct_7d !== undefined),
+  const movers = useMemo(
+    () => [...holdings].filter((h: any) => h.change_pct_7d !== null && h.change_pct_7d !== undefined),
     [holdings],
   );
   const bestSevenDay = useMemo(
-    () => [...topMovers7d]
-      .sort((a: any, b: any) => (b.change_pct_7d || 0) - (a.change_pct_7d || 0))
-      .slice(0, 3),
-    [topMovers7d],
+    () => [...movers].sort((a: any, b: any) => (b.change_pct_7d || 0) - (a.change_pct_7d || 0)).slice(0, 3),
+    [movers],
   );
   const worstSevenDay = useMemo(
-    () => [...topMovers7d]
-      .sort((a: any, b: any) => (a.change_pct_7d || 0) - (b.change_pct_7d || 0))
-      .slice(0, 3),
-    [topMovers7d],
+    () => [...movers].sort((a: any, b: any) => (a.change_pct_7d || 0) - (b.change_pct_7d || 0)).slice(0, 3),
+    [movers],
   );
 
   if (isLoading) return <LoadingScreen />;
-  if (!data) return <div>No data</div>;
+  if (!data || !data.summary || !data.breakdown) return <Typography color="text.secondary">No portfolio data available.</Typography>;
 
   const summary = data.summary;
   const dividends = data.dividends;
   const breakdown = data.breakdown;
-
-  if (!summary || !breakdown) return <div>No data</div>;
-
-  const t = breakdown.totals;
+  const totals = breakdown.totals;
   const ccy = breakdown.base_currency;
 
   return (
-    <div className="space-y-4">
-      {/* === Hero: 3 separate cards in one row === */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-        {/* Card 1: Today + Markets */}
-        <div className="rounded-xl border border-line bg-bg-card shadow-sm p-3 sm:p-4">
-          <DayInline pct={summary.day_change_pct} amount={summary.day_change} ccy={ccy} />
-          {data.benchmarks && (
-            <div className="mt-2 pt-2 border-t border-line/40 flex items-center gap-3 text-xs tabular-nums flex-wrap">
-              {[
-                { key: "sp500", label: "S&P 500" },
-                { key: "nasdaq", label: "NASDAQ" },
-                { key: "dow", label: "Dow" },
-              ].map(({ key, label }) => {
-                const bm = data.benchmarks[key];
-                const bmPct = bm?.change_pct;
-                const bmGood = (bmPct ?? 0) >= 0;
-                const bmColor = bmPct == null ? "text-ink-faint" : (bmGood ? "text-good" : "text-bad");
-                return (
-                  <div key={key} className="flex items-center gap-1">
-                    <span className="text-ink-faint">{label}</span>
-                    <span className={`font-medium ${bmColor}`}>
-                      {bmPct != null ? fmtPct(bmPct, 2) : "—"}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, 1fr)", lg: "repeat(3, 1fr)" }, gap: 1.5 }}>
+        <Card variant="outlined">
+          <CardContent sx={{ p: { xs: 1.5, sm: 2 }, "&:last-child": { pb: { xs: 1.5, sm: 2 } } }}>
+            <DayInline pct={summary.day_change_pct} amount={summary.day_change} ccy={ccy} />
+            {data.benchmarks && (
+              <>
+                <Divider sx={{ my: 1.25 }} />
+                <Stack direction="row" spacing={1.5} sx={{ flexWrap: "wrap" }}>
+                  {[
+                    { key: "sp500", label: "S&P 500" },
+                    { key: "nasdaq", label: "NASDAQ" },
+                    { key: "dow", label: "Dow" },
+                  ].map(({ key, label }) => {
+                    const pct = data.benchmarks[key]?.change_pct;
+                    return (
+                      <Stack key={key} direction="row" spacing={0.5} sx={{ alignItems: "baseline" }}>
+                        <Typography variant="caption" color="text.secondary">{label}</Typography>
+                        <Typography variant="caption" color={pct == null ? "text.disabled" : pct >= 0 ? "success.main" : "error.main"} sx={{ fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
+                          {pct != null ? fmtPct(pct, 2) : "—"}
+                        </Typography>
+                      </Stack>
+                    );
+                  })}
+                </Stack>
+              </>
+            )}
+          </CardContent>
+        </Card>
 
-        {/* Card 2: Net Worth + TWR + XIRR */}
-        <div className="rounded-xl border border-line bg-bg-card shadow-sm p-3 sm:p-4">
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <div className="flex items-center gap-1.5 mb-1">
-                <Briefcase size={11} className="text-accent" />
-                <div className="text-xs uppercase tracking-[0.12em] text-ink-faint">Net Worth</div>
-              </div>
-              <div className="text-xl font-semibold tabular-nums tracking-tight">{fmtMoney(t.current_value, ccy)}</div>
-              <div className="text-xs text-ink-faint mt-0.5 tabular-nums">
-                {holdings.length} pos · cb {fmtMoney(t.capital, ccy)}
-              </div>
-            </div>
-            <div className="flex flex-col gap-1.5 shrink-0">
-              <PillStat label="TWR" pct={breakdown.header?.twr} />
-              <PillStat label="XIRR" pct={breakdown.header?.xirr} />
-            </div>
-          </div>
-        </div>
+        <Card variant="outlined">
+          <CardContent sx={{ p: { xs: 1.5, sm: 2 }, "&:last-child": { pb: { xs: 1.5, sm: 2 } } }}>
+            <Stack direction="row" sx={{ justifyContent: "space-between", gap: 2 }}>
+              <Box>
+                <Stack direction="row" spacing={0.75} sx={{ alignItems: "center", mb: 0.5 }}>
+                  <BriefcaseOutlined fontSize="small" color="primary" />
+                  <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em" }}>Net worth</Typography>
+                </Stack>
+                <Typography variant="h2" sx={{ fontSize: "1.35rem", fontVariantNumeric: "tabular-nums" }}>{fmtMoney(totals.current_value, ccy)}</Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ fontVariantNumeric: "tabular-nums" }}>{holdings.length} positions · capital {fmtMoney(totals.capital, ccy)}</Typography>
+              </Box>
+              <Stack spacing={0.75} sx={{ alignItems: "flex-end" }}>
+                <PillStat label="TWR" pct={breakdown.header?.twr} />
+                <PillStat label="XIRR" pct={breakdown.header?.xirr} />
+              </Stack>
+            </Stack>
+          </CardContent>
+        </Card>
 
-        {/* Card 3: Top Movers (Best + Worst) */}
-        <div className="rounded-xl border border-line bg-bg-card shadow-sm p-3 sm:p-4 sm:col-span-2 lg:col-span-1">
-          <div className="grid grid-cols-2 gap-3">
-            {/* Best 7d */}
-            <div>
-              <div className="flex items-center gap-1.5 mb-1.5">
-                <ArrowUpRight size={11} className="text-good" />
-                <div className="text-xs uppercase tracking-[0.12em] text-ink-faint">Best 7d</div>
-              </div>
-              <div className="space-y-1">
-                {bestSevenDay.length === 0 ? (
-                  <div className="text-xs text-ink-faint py-1">No data</div>
-                ) : bestSevenDay.map((h: any) => (
-                  <div key={h.symbol} className="flex items-center justify-between gap-2 text-sm">
-                    <span className="font-medium truncate leading-tight">{h.name || h.symbol}</span>
-                    <span className="font-semibold text-good tabular-nums shrink-0">{fmtPct(h.change_pct_7d, 1)}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-            {/* Worst 7d */}
-            <div>
-              <div className="flex items-center gap-1.5 mb-1.5">
-                <ArrowDownRight size={11} className="text-bad" />
-                <div className="text-xs uppercase tracking-[0.12em] text-ink-faint">Worst 7d</div>
-              </div>
-              <div className="space-y-1">
-                {worstSevenDay.length === 0 ? (
-                  <div className="text-xs text-ink-faint py-1">No data</div>
-                ) : worstSevenDay.map((h: any) => (
-                  <div key={h.symbol} className="flex items-center justify-between gap-2 text-sm">
-                    <span className="font-medium truncate leading-tight">{h.name || h.symbol}</span>
-                    <span className="font-semibold text-bad tabular-nums shrink-0">{fmtPct(h.change_pct_7d, 1)}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+        <Card variant="outlined" sx={{ gridColumn: { xs: "auto", sm: "1 / -1", lg: "auto" } }}>
+          <CardContent sx={{ p: { xs: 1.5, sm: 2 }, "&:last-child": { pb: { xs: 1.5, sm: 2 } } }}>
+            <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2 }}>
+              <MoverList title="Best 7d" items={bestSevenDay} tone="success" />
+              <MoverList title="Worst 7d" items={worstSevenDay} tone="error" />
+            </Box>
+          </CardContent>
+        </Card>
+      </Box>
 
-      {/* === P&L breakdown === */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <PnlCard
-          label="Unrealized"
-          value={t.current_pnl ?? 0}
-          pct={t.capital > 0 ? (t.current_pnl ?? 0) / t.capital : 0}
-          ccy={ccy}
-          sub={`${holdings.length} open positions`}
-          icon={Briefcase}
-        />
-        <PnlCard
-          label="Realized"
-          value={t.closed_pnl ?? 0}
-          pct={null}
-          ccy={ccy}
-          sub={`${data.profile?.total_roundtrips ?? 0} roundtrips`}
-          icon={Activity}
-        />
-        <PnlCard
-          label="Dividends"
-          value={t.total_div ?? 0}
-          pct={null}
-          ccy={ccy}
-          sub={`${dividends?.summary?.events_count ?? 0} events`}
-          icon={Coins}
-          color="text-warn"
-        />
-        <PnlCard
-          label="Total P&L"
-          value={t.overall_pnl_div ?? 0}
-          pct={t.overall_pnl_div_pct ?? 0}
-          ccy={ccy}
-          sub="unrealized + realized + divs"
-          icon={(t.overall_pnl_div ?? 0) >= 0 ? TrendingUp : TrendingDown}
-        />
-      </div>
+      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2, 1fr)", lg: "repeat(4, 1fr)" }, gap: 1.5 }}>
+        <MetricCard label="Unrealized" value={fmtMoney(totals.current_pnl ?? 0, ccy)} meta={totals.capital > 0 ? fmtPct((totals.current_pnl ?? 0) / totals.capital, 1) : undefined} supporting={`${holdings.length} open positions`} icon={<BriefcaseOutlined fontSize="small" />} tone={(totals.current_pnl ?? 0) >= 0 ? "success" : "error"} />
+        <MetricCard label="Realized" value={fmtMoney(totals.closed_pnl ?? 0, ccy)} supporting={`${data.profile?.total_roundtrips ?? 0} roundtrips`} icon={<InsightsOutlined fontSize="small" />} tone={(totals.closed_pnl ?? 0) >= 0 ? "success" : "error"} />
+        <MetricCard label="Dividends" value={fmtMoney(totals.total_div ?? 0, ccy)} supporting={`${dividends?.summary?.events_count ?? 0} events`} icon={<PaidOutlined fontSize="small" />} tone="warning" />
+        <MetricCard label="Total P&L" value={fmtMoney(totals.overall_pnl_div ?? 0, ccy)} meta={fmtPct(totals.overall_pnl_div_pct ?? 0, 1)} supporting="unrealized + realized + dividends" icon={(totals.overall_pnl_div ?? 0) >= 0 ? <TrendingUpRounded fontSize="small" /> : <TrendingDownRounded fontSize="small" />} tone={(totals.overall_pnl_div ?? 0) >= 0 ? "success" : "error"} />
+      </Box>
 
       <CurrencyPnL />
-
-      {/* === Net worth history chart === */}
       <NetWorthChart ccy={ccy} />
-    </div>
+    </Box>
   );
 }
 
-function PnlCard({ label, value, pct, ccy, sub, icon: Icon, color }: {
-  label: string;
-  value: number;
-  pct: number | null;
-  ccy: string;
-  sub: string;
-  icon: any;
-  color?: string;
-}) {
-  const good = value >= 0;
-  const valColor = color || (good ? "text-good" : "text-bad");
+function MoverList({ title, items, tone }: { title: string; items: any[]; tone: "success" | "error" }) {
+  const Icon = tone === "success" ? ArrowUpwardRounded : ArrowDownwardRounded;
   return (
-    <div className="rounded-lg border border-line bg-bg-card p-3">
-      <div className="flex items-center justify-between">
-        <div className="text-sm uppercase tracking-wide text-ink-faint">{label}</div>
-        <Icon size={14} className={valColor} />
-      </div>
-      <div className={`text-xl font-semibold tabular-nums mt-1 ${valColor}`}>{fmtMoney(value, ccy)}</div>
-      <div className="flex items-center justify-between mt-0.5">
-        <div className="text-sm text-ink-faint">{sub}</div>
-        {pct !== null && (
-          <div className={`text-sm tabular-nums ${valColor}`}>{fmtPct(pct, 1)}</div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: any }) {
-  return (
-    <div>
-      <div className="text-sm uppercase tracking-wide text-ink-faint">{label}</div>
-      <div className="text-sm font-medium tabular-nums">{value}</div>
-    </div>
+    <Box>
+      <Stack direction="row" spacing={0.5} sx={{ alignItems: "center", mb: 0.75 }}>
+        <Icon fontSize="small" color={tone} />
+        <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em" }}>{title}</Typography>
+      </Stack>
+      <Stack spacing={0.5}>
+        {items.length === 0 ? <Typography variant="body2" color="text.disabled">No data</Typography> : items.map((h: any) => (
+          <Stack key={h.symbol} direction="row" sx={{ justifyContent: "space-between", gap: 1 }}>
+            <Typography variant="body2" noWrap sx={{ fontWeight: 600 }}>{h.name || h.symbol}</Typography>
+            <Typography variant="body2" color={`${tone}.main`} sx={{ fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{fmtPct(h.change_pct_7d, 1)}</Typography>
+          </Stack>
+        ))}
+      </Stack>
+    </Box>
   );
 }
 
 function PillStat({ label, pct }: { label: string; pct: number | null | undefined }) {
-  return (
-    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-bg-soft/60 border border-line/40">
-      <span className="text-xs uppercase tracking-wider text-ink-faint">{label}</span>
-      <span className="text-sm font-semibold tabular-nums"><Pct p={pct} digits={2} /></span>
-    </div>
-  );
+  return <Chip size="small" variant="outlined" label={<><span>{label}</span> <Pct p={pct} digits={2} /></>} sx={{ fontVariantNumeric: "tabular-nums" }} />;
 }
 
 function DayInline({ pct, amount, ccy }: { pct: number | null | undefined; amount: number | null | undefined; ccy: string }) {
-  const good = (pct ?? 0) >= 0;
   const hasData = pct !== null && pct !== undefined;
-  const accent = good ? "good" : "bad";
-  const Arrow = good ? ArrowUpRight : ArrowDownRight;
-
+  const good = (pct ?? 0) >= 0;
+  const Arrow = good ? ArrowUpwardRounded : ArrowDownwardRounded;
   return (
-    <div>
-      <div className="flex items-center gap-1.5 mb-1">
-        {hasData && <span className={`w-1.5 h-1.5 rounded-full bg-${accent} animate-pulse`} />}
-        <div className="text-xs uppercase tracking-[0.12em] text-ink-faint">Today</div>
-      </div>
+    <Box>
+      <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em" }}>Today</Typography>
       {hasData ? (
-        <div className="flex items-baseline gap-1.5 flex-wrap">
-          <Arrow size={14} strokeWidth={2.5} className={`self-center text-${accent}`} />
-          <span className={`text-xl font-semibold tabular-nums text-${accent}`}>{fmtPct(pct, 2)}</span>
-          {amount !== null && amount !== undefined && (
-            <span className={`text-xs tabular-nums text-${accent}/70`}>{fmtMoney(amount, ccy)}</span>
-          )}
-        </div>
-      ) : (
-        <div className="text-xl font-semibold text-ink-faint">—</div>
-      )}
-    </div>
+        <Stack direction="row" spacing={0.75} sx={{ alignItems: "baseline", mt: 0.5, flexWrap: "wrap" }}>
+          <Arrow fontSize="small" color={good ? "success" : "error"} />
+          <Typography variant="h2" color={good ? "success.main" : "error.main"} sx={{ fontSize: "1.35rem", fontVariantNumeric: "tabular-nums" }}>{fmtPct(pct, 2)}</Typography>
+          {amount !== null && amount !== undefined && <Typography variant="body2" color={good ? "success.main" : "error.main"} sx={{ opacity: 0.78, fontVariantNumeric: "tabular-nums" }}>{fmtMoney(amount, ccy)}</Typography>}
+        </Stack>
+      ) : <Typography variant="h2" color="text.disabled" sx={{ mt: 0.5 }}>—</Typography>}
+    </Box>
   );
-}
-
-function BenchmarksInline({ benchmarks }: { benchmarks: any }) {
-  return null;
 }

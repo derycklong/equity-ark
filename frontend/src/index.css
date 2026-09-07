@@ -1,9 +1,9 @@
-@tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --app-font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: var(--app-font-family);
   color-scheme: dark;
 
   /* Dark theme (default) — RGB component form so Tailwind opacity works */
@@ -21,6 +21,7 @@
   --accent-rgb: 96 165 250;
   --accent-soft-rgb: 59 130 246;
   --info-rgb: 167 139 250;
+  --logo-bg: #0f172a;
 
   /* Helper hex forms (only used by non-Tailwind CSS like shadows) */
   --bg: rgb(var(--bg-rgb));
@@ -59,6 +60,7 @@
   --accent-rgb: 37 99 235;
   --accent-soft-rgb: 29 78 216;
   --info-rgb: 124 58 237;
+  --logo-bg: #e8f0ff;
   --scrollbar-thumb-hover: rgb(148 163 184);
 }
 
@@ -77,8 +79,94 @@ html {
 body {
   background: var(--bg);
   color: var(--ink);
+  font-family: var(--app-font-family);
+  margin: 0;
   transition: background-color 0.2s ease, color 0.2s ease;
 }
+
+/* Keep native controls and legacy utility components on the same Material
+   surface tokens as the MUI pages. */
+input, textarea, select {
+  color: var(--ink);
+  background: var(--bg-card);
+  border-color: var(--line);
+}
+
+input::placeholder, textarea::placeholder {
+  color: var(--ink-faint);
+  opacity: 1;
+}
+
+/* A few transaction affordances still use native controls inside a MUI
+   dialog. Give them the same density, radius, focus ring, and semantic
+   colors as the rest of the Material surface. */
+.material-legacy-form label {
+  color: var(--ink-dim);
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+.material-legacy-form input,
+.material-legacy-form select,
+.material-legacy-form textarea {
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
+}
+.material-legacy-form textarea { min-height: 76px; }
+.material-legacy-form input:focus,
+.material-legacy-form select:focus,
+.material-legacy-form textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / 0.18);
+}
+.material-legacy-form button:not(.MuiButton-root) {
+  min-height: 40px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--bg-soft);
+  color: var(--ink);
+  font-weight: 650;
+  appearance: none;
+  -webkit-appearance: none;
+  outline: none;
+  box-shadow: none;
+}
+.material-legacy-form button:not(.MuiButton-root).bg-brand {
+  border-color: var(--accent-soft);
+  background: var(--accent-soft);
+  color: #fff;
+}
+.material-legacy-form button:not(.MuiButton-root)[class~="bg-good/20"] {
+  border-color: var(--good);
+  background: rgb(var(--good-rgb) / 0.14);
+  color: var(--good);
+}
+.material-legacy-form button:not(.MuiButton-root)[class~="bg-bad/20"] {
+  border-color: var(--bad);
+  background: rgb(var(--bad-rgb) / 0.14);
+  color: var(--bad);
+}
+.material-legacy-form button:not(.MuiButton-root):focus {
+  outline: none;
+  box-shadow: none;
+}
+.material-legacy-form button:not(.MuiButton-root):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.material-legacy-form .bg-brand { background: var(--accent-soft); }
+
+button, input, textarea, select {
+  font-family: inherit;
+}
+
+@keyframes material-spin {
+  to { transform: rotate(360deg); }
+}
+.spin-icon { animation: material-spin 1s linear infinite; }
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: var(--scrollbar-track); }
@@ -96,6 +184,12 @@ body {
 
 /* Make the modal backdrop and table cells friendlier to touch targets */
 @media (max-width: 640px) {
+  body { overflow-x: hidden; }
+  .MuiCard-root { border-radius: 14px; }
+  .MuiCardContent-root { min-width: 0; }
+  .MuiButton-root { min-height: 40px; }
+  .MuiIconButton-root { min-width: 40px; min-height: 40px; }
+  .MuiInputBase-root { min-height: 44px; }
   /* Slightly larger hit areas for icon-only buttons */
   button[title] { min-height: 28px; }
 }

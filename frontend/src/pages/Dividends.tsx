@@ -1,23 +1,27 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
+import { Accordion, AccordionDetails, AccordionSummary, Box, Button, Card, CardContent, Chip, LinearProgress, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography } from "@mui/material";
+import ExpandMoreRounded from "@mui/icons-material/ExpandMoreRounded";
 import { api } from "../lib/api";
 import { fmtDate, ccySymbol, fmtMoneyFull, fmtPct, fmtNum } from "../lib/utils";
 import { Coins, Building2, ArrowUpRight, ArrowDownRight, RefreshCw, ChevronDown, ChevronUp, BarChart3, Calendar, Wallet, TrendingUp, ListChecks } from "lucide-react";
 import { useDividends, useHoldings, useInvalidateAll } from "../hooks/usePortfolio";
 import { LoadingScreen } from "../components/LoadingScreen";
 import MobileTable from "../components/MobileTable";
+import PageHeader from "../components/ui/PageHeader";
+import MetricCard from "../components/ui/MetricCard";
 
 const BASE_CCY = "SGD";
 
 const CCY_COLORS: Record<string, string> = {
-  SGD: "bg-warn",
-  USD: "bg-accent",
-  HKD: "bg-good",
-  GBP: "bg-bad",
-  CNY: "bg-info",
+  SGD: "warning.main",
+  USD: "primary.main",
+  HKD: "success.main",
+  GBP: "error.main",
+  CNY: "info.main",
 };
 
 function colorForCcy(ccy: string) {
-  return CCY_COLORS[ccy] || "bg-ink-faint";
+  return CCY_COLORS[ccy] || "text.disabled";
 }
 
 type CardId = "kpi" | "monthly" | "yearly" | "payers" | "currency";
@@ -251,208 +255,138 @@ export default function Dividends() {
   if (!data) return <div>No data</div>;
 
   return (
-    <div className="space-y-3 lg:flex lg:flex-col lg:h-[calc(100vh-4rem)]">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1">
-        <h1 className="text-xl font-semibold flex items-center gap-2">
-          <Coins size={18} className="text-warn" />
-          Dividends
-        </h1>
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm text-ink-faint">
-            {summary.events_count} events · {bySymbol.length} payers · {ccys.length} currenc{ccys.length !== 1 ? "ies" : "y"}
-          </span>
-          {refreshMsg && <span className="text-sm text-ink-faint">{refreshMsg}</span>}
-          <button
-            onClick={handleRefresh}
-            disabled={refreshing}
-            className="flex items-center gap-1 px-2 py-1 rounded text-sm text-ink-dim hover:text-ink hover:bg-bg-soft disabled:opacity-50"
-            title="Re-fetch dividend history from yfinance for all held symbols"
-          >
-            <RefreshCw size={12} className={refreshing ? "animate-spin" : ""} />
-            {refreshing ? "Refreshing…" : "Refresh"}
-          </button>
-        </div>
-      </div>
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 2, minHeight: { lg: "calc(100vh - 96px)" } }}>
+      <PageHeader
+        title="Dividends"
+        icon={<Coins size={20} />}
+        subtitle={`${summary.events_count || 0} events · ${bySymbol.length} payers · ${ccys.length} currencies`}
+        actions={<Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ alignItems: { xs: "stretch", sm: "center" }, width: { xs: "100%", sm: "auto" } }}>{refreshMsg && <Typography variant="caption" color="text.secondary">{refreshMsg}</Typography>}<Button size="small" variant="outlined" onClick={handleRefresh} disabled={refreshing} startIcon={<RefreshCw size={14} className={refreshing ? "animate-spin" : ""} />} sx={{ width: { xs: "100%", sm: "auto" } }}>{refreshing ? "Refreshing…" : "Refresh data"}</Button></Stack>}
+      />
+
+      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2, 1fr)", md: "repeat(4, 1fr)" }, gap: 1.5 }}>
+        <MetricCard label="Lifetime" value={fmtMoneyFull(totalSgd, BASE_CCY)} supporting="net dividends received" tone="warning" icon={<Coins size={16} />} />
+        <MetricCard label={`YTD ${currentYear}`} value={fmtMoneyFull(ytdSgd, BASE_CCY)} supporting={lastYtdSgd > 0 ? `${fmtPct(yoyChange, 1)} vs ${lastYear}` : "current year"} tone={yoyChange >= 0 ? "success" : "error"} />
+        <MetricCard label="Top payer" value={topPayer ? (topPayer.name || topPayer.symbol) : "—"} supporting={topPayer ? `${fmtPct(topPayerPct, 2)} yield · ${lastFullYear}` : "No payer data"} tone="primary" />
+        <MetricCard label="Avg / month" value={fmtMoneyFull(monthlySorted.length ? monthlySorted.reduce((sum, [, value]) => sum + value, 0) / monthlySorted.length : 0, BASE_CCY)} supporting="across available months" />
+      </Box>
 
       {/* === Mobile: transactions only (full width) === */}
       {/* === Desktop: 2-column layout: Left = transactions, Right = accordion cards === */}
-      <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-3 lg:flex-1 lg:min-h-0">
+      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "minmax(0, 2fr) minmax(300px, 1fr)" }, gap: 1.5, flex: { lg: 1 }, minHeight: { lg: 0 } }}>
         {/* LEFT — All dividend transactions */}
-        <div className="rounded-lg border border-line bg-bg-card overflow-hidden lg:row-span-1 flex flex-col">
-          <div className="px-3 py-2 border-b border-line flex items-center justify-between gap-2 bg-bg-soft shrink-0">
+        <Card variant="outlined" sx={{ overflow: "hidden", display: "flex", flexDirection: "column", minHeight: { lg: 0 } }}>
+          <Stack direction="row" sx={{ px: 1.25, py: 0.75, alignItems: "center", justifyContent: "space-between", gap: 1, bgcolor: "action.hover", borderBottom: 1, borderColor: "divider", flexShrink: 0 }}>
             {/* Section title is redundant on mobile (the page header already
                 says "Dividends"); only show it when we're in the 2-column
                 desktop layout. The currency filter chips stay visible on
                 both layouts. */}
-            <h2 className="hidden lg:flex text-sm font-medium shrink-0 items-center gap-1.5">
-              <ListChecks size={13} className="text-warn" />
+            <Typography variant="caption" sx={{ display: { xs: "none", lg: "flex" }, alignItems: "center", gap: 0.75, fontWeight: 700, whiteSpace: "nowrap" }}>
+              <Box sx={{ color: "warning.main", display: "flex" }}><ListChecks size={13} /></Box>
               All dividend transactions
-            </h2>
-            <div className="flex items-center gap-1 text-sm overflow-x-auto whitespace-nowrap">
-              <button
+            </Typography>
+            <Stack direction="row" spacing={0.5} sx={{ overflowX: "auto", whiteSpace: "nowrap", minWidth: 0, ml: { xs: "auto", lg: 0 } }}>
+              <Chip
                 onClick={() => setCcyFilter("ALL")}
-                className={`shrink-0 px-2 py-0.5 rounded ${ccyFilter === "ALL" ? "bg-warn text-bg font-medium" : "text-ink-dim hover:text-ink hover:bg-bg-card"}`}
-              >
-                All ({events.length})
-              </button>
+                label={`All (${events.length})`}
+                size="small"
+                color={ccyFilter === "ALL" ? "warning" : "default"}
+                variant={ccyFilter === "ALL" ? "filled" : "outlined"}
+                sx={{ height: 22, fontSize: "0.68rem", "& .MuiChip-label": { px: 0.75 } }}
+              />
               {ccys.map((c) => {
                 const count = events.filter((e: any) => e.currency === c).length;
                 return (
-                  <button
+                  <Chip
                     key={c}
                     onClick={() => setCcyFilter(c)}
-                    className={`shrink-0 px-2 py-0.5 rounded ${ccyFilter === c ? "bg-warn text-bg font-medium" : "text-ink-dim hover:text-ink hover:bg-bg-card"}`}
-                  >
-                    {c} ({count})
-                  </button>
+                    label={`${c} (${count})`}
+                    size="small"
+                    color={ccyFilter === c ? "warning" : "default"}
+                    variant={ccyFilter === c ? "filled" : "outlined"}
+                    sx={{ height: 22, fontSize: "0.68rem", "& .MuiChip-label": { px: 0.75 } }}
+                  />
                 );
               })}
-            </div>
-          </div>
-          <div className="flex-1 min-h-0 overflow-auto">
+            </Stack>
+          </Stack>
+          <Box sx={{ flex: 1, minHeight: 0, overflow: "auto" }}>
             <MobileTable
               items={filteredEvents}
               keyOf={(e: any, i: number) => `${e.symbol}-${e.ex_date}-${i}`}
               empty="No dividend events"
               renderCard={(e: any) => (
-                <div className="rounded-lg border border-line bg-bg-card p-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <div className="font-medium truncate leading-tight">{e.name || e.symbol}</div>
-                      {e.name && <div className="text-ink-faint text-sm tabular-nums truncate">{e.symbol}</div>}
-                      <div className="text-xs text-ink-faint tabular-nums mt-0.5">
-                        {fmtDate(e.ex_date)} · {e.currency}
-                      </div>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <div className="text-sm font-semibold tabular-nums text-warn">
-                        {ccySymbol(e.currency)}{e.total_received.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </div>
-                      <div className="text-xs tabular-nums text-ink-faint mt-0.5">
-                        = {fmtMoneyFull((e.total_received || 0) * (rateOf(e) || 0), BASE_CCY)}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="mt-2 pt-2 border-t border-line/50 grid grid-cols-2 gap-2 text-xs">
-                    <div>
-                      <div className="text-[10px] uppercase tracking-wider text-ink-faint leading-tight">Shares</div>
-                      <div className="text-sm tabular-nums leading-tight">
-                        {e.shares_at_ex.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-[10px] uppercase tracking-wider text-ink-faint leading-tight">Per share</div>
-                      <div className="text-sm tabular-nums leading-tight text-ink-dim">
-                        {ccySymbol(e.currency)}{e.amount_per_share.toLocaleString("en-US", { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
-                      </div>
-                    </div>
-                  </div>
-                </div>
+                <Card variant="outlined">
+                  <CardContent sx={{ p: 1.5, "&:last-child": { pb: 1.5 } }}>
+                    <Stack direction="row" sx={{ justifyContent: "space-between", alignItems: "flex-start", gap: 1 }}>
+                      <Box sx={{ minWidth: 0, flex: 1 }}>
+                        <Stack direction="row" spacing={0.75} sx={{ alignItems: "baseline", minWidth: 0 }}>
+                          <Typography variant="body2" sx={{ fontWeight: 700 }} noWrap>{e.symbol}</Typography>
+                          <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 650 }}>{e.currency}</Typography>
+                        </Stack>
+                        <Typography variant="caption" color="text.secondary" noWrap sx={{ display: "block", mt: 0.15 }}>{e.name || "Dividend event"}</Typography>
+                      </Box>
+                      <Box sx={{ textAlign: "right", flexShrink: 0 }}>
+                        <Typography variant="caption" color="text.secondary" sx={{ display: "block", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em" }}>Received</Typography>
+                        <Typography variant="body1" sx={{ color: "success.main", fontWeight: 750, fontVariantNumeric: "tabular-nums" }}>{ccySymbol(e.currency)}{e.total_received.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ fontVariantNumeric: "tabular-nums" }}>= {fmtMoneyFull((e.total_received || 0) * (rateOf(e) || 0), BASE_CCY)}</Typography>
+                      </Box>
+                    </Stack>
+                    <Box sx={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 0.75, mt: 1.25, pt: 1, borderTop: 1, borderColor: "divider" }}>
+                      <Box sx={{ minWidth: 0 }}><Typography variant="caption" color="text.secondary" sx={{ display: "block", fontSize: "0.62rem" }}>Ex-date</Typography><Typography variant="caption" sx={{ fontWeight: 650, fontVariantNumeric: "tabular-nums" }} noWrap>{fmtDate(e.ex_date)}</Typography></Box>
+                      <Box sx={{ minWidth: 0 }}><Typography variant="caption" color="text.secondary" sx={{ display: "block", fontSize: "0.62rem" }}>Shares</Typography><Typography variant="caption" sx={{ fontWeight: 650, fontVariantNumeric: "tabular-nums" }} noWrap>{e.shares_at_ex.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Typography></Box>
+                      <Box sx={{ minWidth: 0 }}><Typography variant="caption" color="text.secondary" sx={{ display: "block", fontSize: "0.62rem" }}>Per share</Typography><Typography variant="caption" sx={{ fontWeight: 650, fontVariantNumeric: "tabular-nums" }} noWrap>{ccySymbol(e.currency)}{e.amount_per_share.toLocaleString("en-US", { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</Typography></Box>
+                    </Box>
+                  </CardContent>
+                </Card>
               )}
               renderTable={() => (
-                <table className="w-full text-sm">
-                  <thead className="text-ink-faint text-sm uppercase sticky top-0 bg-bg-card border-b border-line">
-                    <tr>
-                      <th className="text-left px-3 py-1.5 font-medium">Ex-date</th>
-                      <th className="text-left px-2 py-1.5 font-medium">Symbol</th>
-                      <th className="text-right px-2 py-1.5 font-medium hidden sm:table-cell">Shares</th>
-                      <th className="text-right px-2 py-1.5 font-medium hidden sm:table-cell">Per share</th>
-                      <th className="text-right px-2 py-1.5 font-medium">Received</th>
-                      <th className="text-right px-3 py-1.5 font-medium">In {BASE_CCY}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredEvents.map((e: any, i: number) => (
-                      <tr key={`${e.symbol}-${e.ex_date}-${i}`} className="border-t border-line/50 hover:bg-bg-soft">
-                        <td className="px-3 py-1.5 text-ink-dim tabular-nums whitespace-nowrap">{fmtDate(e.ex_date)}</td>
-                        <td className="px-2 py-1.5 whitespace-nowrap">
-                          <div className="text-sm font-medium leading-tight">{e.name || e.symbol}</div>
-                          {e.name && <div className="text-ink-faint text-sm leading-tight tabular-nums">{e.symbol}</div>}
-                        </td>
-                        <td className="px-2 py-1.5 text-right tabular-nums whitespace-nowrap hidden sm:table-cell">
-                          {e.shares_at_ex.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </td>
-                        <td className="px-2 py-1.5 text-right tabular-nums text-ink-dim whitespace-nowrap hidden sm:table-cell">
-                          {ccySymbol(e.currency)}{e.amount_per_share.toLocaleString("en-US", { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
-                        </td>
-                        <td className="px-2 py-1.5 text-right tabular-nums text-warn whitespace-nowrap">
-                          {ccySymbol(e.currency)}{e.total_received.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </td>
-                        <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap font-medium">
-                          {fmtMoneyFull((e.total_received || 0) * (rateOf(e) || 0), BASE_CCY)}
-                        </td>
-                      </tr>
-                    ))}
-                    {filteredEvents.length === 0 && (
-                      <tr>
-                        <td colSpan={6} className="px-3 py-6 text-center text-ink-faint text-sm">
-                          No dividend events
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
+                <TableContainer sx={{ overflowX: "auto" }}>
+                  <Table size="small" stickyHeader sx={{ minWidth: 680 }}>
+                    <TableHead><TableRow><TableCell>Ex-date</TableCell><TableCell>Symbol</TableCell><TableCell align="right" sx={{ display: { xs: "none", sm: "table-cell" } }}>Shares</TableCell><TableCell align="right" sx={{ display: { xs: "none", sm: "table-cell" } }}>Per share</TableCell><TableCell align="right">Received</TableCell><TableCell align="right">In {BASE_CCY}</TableCell></TableRow></TableHead>
+                    <TableBody>
+                      {filteredEvents.map((e: any, i: number) => (
+                        <TableRow key={`${e.symbol}-${e.ex_date}-${i}`} hover>
+                          <TableCell sx={{ color: "text.secondary", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{fmtDate(e.ex_date)}</TableCell>
+                          <TableCell><Typography variant="body2" sx={{ fontWeight: 650, whiteSpace: "nowrap" }}>{e.name || e.symbol}</Typography>{e.name && <Typography variant="caption" color="text.secondary">{e.symbol}</Typography>}</TableCell>
+                          <TableCell align="right" sx={{ display: { xs: "none", sm: "table-cell" }, fontVariantNumeric: "tabular-nums" }}>{e.shares_at_ex.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                          <TableCell align="right" sx={{ display: { xs: "none", sm: "table-cell" }, color: "text.secondary", fontVariantNumeric: "tabular-nums" }}>{ccySymbol(e.currency)}{e.amount_per_share.toLocaleString("en-US", { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 650, fontVariantNumeric: "tabular-nums" }}><Typography component="span" sx={{ color: "success.main", fontWeight: 700 }}>{ccySymbol(e.currency)}{e.total_received.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Typography></TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 650, fontVariantNumeric: "tabular-nums" }}>{fmtMoneyFull((e.total_received || 0) * (rateOf(e) || 0), BASE_CCY)}</TableCell>
+                        </TableRow>
+                      ))}
+                      {filteredEvents.length === 0 && <TableRow><TableCell colSpan={6} align="center"><Typography variant="body2" color="text.secondary">No dividend events</Typography></TableCell></TableRow>}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
               )}
             />
-          </div>
-        </div>
+          </Box>
+        </Card>
 
         {/* RIGHT — Accordion cards (desktop only).
             Sticky so it stays in view as the left table scrolls internally,
             and `self-start` so the column doesn't stretch to fill the grid
             track (which would visually stretch the Snapshot card). */}
-        <div className="hidden lg:block lg:self-start lg:sticky lg:top-4 space-y-2">
+        <Box sx={{ alignSelf: "start", minWidth: 0, position: { lg: "sticky" }, top: { lg: 16 }, maxHeight: { lg: "calc(100vh - 8rem)" }, overflowY: { lg: "auto" }, pr: { lg: 0.5 }, display: { xs: "none", lg: "flex" }, flexDirection: "column", gap: 1 }}>
           {/* Card 1: KPI snapshot */}
           <AccordionCard
             id="kpi"
             title="Snapshot"
-            icon={<BarChart3 size={13} className="text-warn" />}
+            icon={<BarChart3 size={13} />}
             open={openCard === "kpi"}
             onToggle={() => toggleCard("kpi")}
           >
-            <div className="grid grid-cols-2 gap-2">
-              <div className="rounded-md border border-line bg-bg-soft/50 px-3 py-2">
-                <div className="text-xs uppercase tracking-wide text-ink-faint">Lifetime</div>
-                <div className="text-lg font-semibold text-warn tabular-nums leading-tight mt-0.5">{fmtMoneyFull(totalSgd, BASE_CCY)}</div>
-              </div>
-              <div className="rounded-md border border-line bg-bg-soft/50 px-3 py-2">
-                <div className="text-xs uppercase tracking-wide text-ink-faint">YTD {currentYear}</div>
-                <div className="text-lg font-semibold tabular-nums leading-tight mt-0.5">{fmtMoneyFull(ytdSgd, BASE_CCY)}</div>
-                {lastYtdSgd > 0 && (
-                  <div className={`text-xs flex items-center gap-0.5 leading-tight ${yoyChange >= 0 ? "text-good" : "text-bad"}`}>
-                    {yoyChange >= 0 ? <ArrowUpRight size={9} /> : <ArrowDownRight size={9} />}
-                    {fmtPct(yoyChange, 1)} vs {lastYear}
-                  </div>
-                )}
-              </div>
-              <div className="rounded-md border border-line bg-bg-soft/50 px-3 py-2">
-                <div className="text-xs uppercase tracking-wide text-ink-faint">Top payer</div>
-                {topPayer ? (
-                  <>
-                    <div className="text-sm font-semibold leading-tight truncate mt-0.5">{topPayer.name || topPayer.symbol}</div>
-                    {topPayer.name && <div className="text-ink-faint text-xs leading-tight truncate tabular-nums">{topPayer.symbol}</div>}
-                    <div className="text-xs tabular-nums leading-tight">
-                      <span className="text-warn font-medium">{fmtPct(topPayerPct, 2)}</span>
-                      <span className="text-ink-faint"> yield · {lastFullYear}</span>
-                    </div>
-                  </>
-                ) : (
-                  <div className="text-sm text-ink-faint">—</div>
-                )}
-              </div>
-              <div className="rounded-md border border-line bg-bg-soft/50 px-3 py-2">
-                <div className="text-xs uppercase tracking-wide text-ink-faint">Avg / month</div>
-                <div className="text-lg font-semibold tabular-nums leading-tight mt-0.5">
-                  {fmtMoneyFull(
-                    monthlySorted.length > 0
-                      ? monthlySorted.reduce((s, [, v]) => s + v, 0) / monthlySorted.length
-                      : 0,
-                    BASE_CCY,
-                  )}
-                </div>
-              </div>
-            </div>
+            <Box sx={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 1 }}>
+              <SideMetric label="Lifetime" value={fmtMoneyFull(totalSgd, BASE_CCY)} tone="warning.main" />
+              <SideMetric
+                label={`YTD ${currentYear}`}
+                value={fmtMoneyFull(ytdSgd, BASE_CCY)}
+                detail={lastYtdSgd > 0 ? <Stack direction="row" spacing={0.25} sx={{ alignItems: "center" }}><span>{yoyChange >= 0 ? <ArrowUpRight size={10} /> : <ArrowDownRight size={10} />}</span>{fmtPct(yoyChange, 1)} vs {lastYear}</Stack> : undefined}
+                tone={lastYtdSgd > 0 ? (yoyChange >= 0 ? "success.main" : "error.main") : undefined}
+              />
+              <SideMetric label="Top payer" value={topPayer ? (topPayer.name || topPayer.symbol) : "—"} detail={topPayer ? `${fmtPct(topPayerPct, 2)} yield · ${lastFullYear}` : undefined} tone="warning.main" />
+              <SideMetric label="Avg / month" value={fmtMoneyFull(monthlySorted.length > 0 ? monthlySorted.reduce((s, [, v]) => s + v, 0) / monthlySorted.length : 0, BASE_CCY)} />
+            </Box>
           </AccordionCard>
 
           {/* Card 2: Monthly trend */}
@@ -460,32 +394,25 @@ export default function Dividends() {
             <AccordionCard
               id="monthly"
               title="Monthly trend"
-              icon={<TrendingUp size={13} className="text-warn" />}
+              icon={<TrendingUp size={13} />}
               open={openCard === "monthly"}
               onToggle={() => toggleCard("monthly")}
               badge={`last ${last12Months.length} mo`}
             >
-              <div className="flex items-end gap-0.5 h-40">
+              <Box sx={{ display: "flex", alignItems: "stretch", gap: 0.5, height: 160 }}>
                 {last12Months.map(([k, v]) => {
                   const pct = (v / maxMonthSgd) * 100;
                   const [y, m] = k.split("-");
                   const monthLabel = new Date(Number(y), Number(m) - 1).toLocaleString("en-US", { month: "short" });
                   const isCurrentMonth = k === last12Months[last12Months.length - 1][0];
                   return (
-                    <div key={k} className="flex-1 h-full flex flex-col items-stretch justify-end group relative">
-                      <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 hidden group-hover:block bg-bg-card border border-line rounded px-2 py-1 text-xs whitespace-nowrap z-10 shadow-lg">
-                        <div className="font-medium">{monthLabel} {y}</div>
-                        <div className="text-warn tabular-nums">{fmtMoneyFull(v, BASE_CCY)}</div>
-                      </div>
-                      <div
-                        className={`w-full rounded-t transition-all ${isCurrentMonth ? "bg-warn" : "bg-warn/40 group-hover:bg-warn/70"}`}
-                        style={{ height: `${Math.max(pct, 1)}%` }}
-                      />
-                      <div className="text-[8px] text-ink-faint text-center mt-0.5 leading-none">{monthLabel}</div>
-                    </div>
+                    <Box key={k} title={`${monthLabel} ${y}: ${fmtMoneyFull(v, BASE_CCY)}`} sx={{ flex: 1, minWidth: 0, height: "100%", display: "flex", flexDirection: "column", justifyContent: "flex-end", alignItems: "stretch" }}>
+                      <Box sx={{ height: `${Math.max(pct, 1)}%`, minHeight: 2, bgcolor: isCurrentMonth ? "warning.main" : "warning.light", opacity: isCurrentMonth ? 1 : 0.45, borderRadius: "4px 4px 0 0", transition: "opacity 160ms" }} />
+                      <Typography variant="caption" color="text.secondary" align="center" sx={{ fontSize: "0.58rem", mt: 0.35, lineHeight: 1 }}>{monthLabel}</Typography>
+                    </Box>
                   );
                 })}
-              </div>
+              </Box>
             </AccordionCard>
           )}
 
@@ -494,49 +421,45 @@ export default function Dividends() {
             <AccordionCard
               id="yearly"
               title="By year · stacked"
-              icon={<Calendar size={13} className="text-warn" />}
+              icon={<Calendar size={13} />}
               open={openCard === "yearly"}
               onToggle={() => toggleCard("yearly")}
               badge={
-                <div className="flex items-center gap-1.5 text-xs text-ink-dim">
+                <Stack direction="row" spacing={0.75} sx={{ alignItems: "center" }}>
                   {ccys.map((c) => (
-                    <div key={c} className="flex items-center gap-1">
-                      <div className={`w-2 h-2 rounded-sm ${colorForCcy(c)}`} />
-                      <span className="font-medium">{c}</span>
-                    </div>
+                    <Stack key={c} direction="row" spacing={0.35} sx={{ alignItems: "center" }}><Box sx={{ width: 7, height: 7, borderRadius: 0.75, bgcolor: colorForCcy(c) }} /><Typography variant="caption" sx={{ fontWeight: 650 }}>{c}</Typography></Stack>
                   ))}
-                </div>
+                </Stack>
               }
             >
-              <div className="space-y-1">
+              <Stack spacing={0.75}>
                 {allYears.map((y) => {
                   const sgd = Number(yearTotalsSgd[y] || 0);
                   const byCcy = byYearCcySgd[y] || {};
                   return (
-                    <div key={y} className="flex items-center gap-2">
-                      <div className="w-10 text-xs text-ink-dim shrink-0 tabular-nums">{y}</div>
-                      <div className="flex-1 h-4 rounded bg-bg-soft overflow-hidden flex">
+                    <Stack key={y} direction="row" spacing={1} sx={{ alignItems: "center" }}>
+                      <Typography variant="caption" color="text.secondary" sx={{ width: 34, flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{y}</Typography>
+                      <Box sx={{ flex: 1, height: 14, borderRadius: 1, bgcolor: "action.hover", overflow: "hidden", display: "flex" }}>
                         {ccys.map((c) => {
                           const v = byCcy[c] || 0;
                           if (v <= 0) return null;
                           const pct = (v / maxYearSgd) * 100;
                           return (
-                            <div
+                            <Box
                               key={c}
-                              className={`${colorForCcy(c)} h-full`}
-                              style={{ width: `${pct}%` }}
+                              sx={{ width: `${pct}%`, bgcolor: colorForCcy(c), height: "100%" }}
                               title={`${c} ${fmtMoneyFull(v, BASE_CCY)}`}
                             />
                           );
                         })}
-                      </div>
-                      <div className="w-24 text-right text-xs tabular-nums shrink-0">
+                      </Box>
+                      <Typography variant="caption" align="right" sx={{ width: 86, flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>
                         {fmtMoneyFull(sgd, BASE_CCY)}
-                      </div>
-                    </div>
+                      </Typography>
+                    </Stack>
                   );
                 })}
-              </div>
+              </Stack>
             </AccordionCard>
           )}
 
@@ -545,12 +468,12 @@ export default function Dividends() {
             <AccordionCard
               id="payers"
               title="Top payers"
-              icon={<Building2 size={13} className="text-warn" />}
+              icon={<Building2 size={13} />}
               open={openCard === "payers"}
               onToggle={() => toggleCard("payers")}
               badge={`by ${lastFullYear} yield`}
             >
-              <div className="divide-y divide-line/50">
+              <Stack divider={<Box sx={{ borderBottom: 1, borderColor: "divider" }} />}>
                 {bySymbolWithName
                   .map((s: any) => {
                     const sym = s.symbol.toUpperCase();
@@ -569,24 +492,20 @@ export default function Dividends() {
                     }), 0.01);
                     const pctBar = s.yieldPct / maxYield;
                     return (
-                      <div key={s.symbol} className="py-1.5 flex items-center gap-2 first:pt-0 last:pb-0">
-                        <div className="w-4 text-xs text-ink-faint tabular-nums">{i + 1}</div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-baseline justify-between gap-2">
-                            <div className="font-medium text-sm truncate leading-tight">{s.name || s.symbol}</div>
-                            <div className="text-sm font-semibold text-warn tabular-nums shrink-0">
-                              {fmtPct(s.yieldPct, 2)}
-                            </div>
-                          </div>
-                          {s.name && <div className="text-ink-faint text-xs truncate tabular-nums leading-tight">{s.symbol}</div>}
-                          <div className="h-0.5 rounded bg-bg-soft overflow-hidden mt-0.5">
-                            <div className="h-full bg-warn/60" style={{ width: `${pctBar * 100}%` }} />
-                          </div>
-                        </div>
-                      </div>
+                      <Stack key={s.symbol} direction="row" spacing={1} sx={{ py: 0.9, alignItems: "center", minWidth: 0 }}>
+                        <Typography variant="caption" color="text.secondary" sx={{ width: 16, flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{i + 1}</Typography>
+                        <Box sx={{ flex: 1, minWidth: 0 }}>
+                          <Stack direction="row" sx={{ justifyContent: "space-between", alignItems: "baseline", gap: 1 }}>
+                            <Typography variant="body2" sx={{ fontWeight: 650 }} noWrap>{s.name || s.symbol}</Typography>
+                            <Typography variant="caption" color="warning.main" sx={{ fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{fmtPct(s.yieldPct, 2)}</Typography>
+                          </Stack>
+                          {s.name && <Typography variant="caption" color="text.secondary" noWrap sx={{ display: "block" }}>{s.symbol}</Typography>}
+                          <LinearProgress variant="determinate" value={Math.min(pctBar * 100, 100)} sx={{ height: 3, mt: 0.5, borderRadius: 2, bgcolor: "action.hover", "& .MuiLinearProgress-bar": { bgcolor: "warning.main" } }} />
+                        </Box>
+                      </Stack>
                     );
                   })}
-              </div>
+              </Stack>
             </AccordionCard>
           )}
 
@@ -595,12 +514,12 @@ export default function Dividends() {
             <AccordionCard
               id="currency"
               title="By currency"
-              icon={<Wallet size={13} className="text-warn" />}
+              icon={<Wallet size={13} />}
               open={openCard === "currency"}
               onToggle={() => toggleCard("currency")}
               badge="native totals"
             >
-              <div className="divide-y divide-line/50">
+              <Stack divider={<Box sx={{ borderBottom: 1, borderColor: "divider" }} />}>
                 {ccys.map((ccy) => {
                   const syms = Object.entries(perCcyBySymbol[ccy] || {})
                     .sort((a, b) => b[1].total - a[1].total);
@@ -608,51 +527,41 @@ export default function Dividends() {
                   const ccyTotalSgd = syms.reduce((sum, [, v]) => sum + v.totalSgd, 0);
                   const sym = ccySymbol(ccy);
                   const eventCount = syms.reduce((s, [, v]) => s + v.events, 0);
-                  return (
-                    <div key={ccy} className="py-2 first:pt-0 last:pb-0">
-                      <div className="flex items-center justify-between mb-1">
-                        <div className="flex items-center gap-1.5">
-                          <div className={`w-2 h-2 rounded-sm ${colorForCcy(ccy)}`} />
-                          <span className="text-sm font-semibold">{ccy}</span>
-                          <span className="text-xs text-ink-faint">· {syms.length} payers · {eventCount} events</span>
-                        </div>
-                        <div className="text-right">
-                          <div className="text-sm font-semibold tabular-nums">
-                            {sym} {ccyTotal.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </div>
-                          <div className="text-xs text-warn tabular-nums">
-                            = {fmtMoneyFull(ccyTotalSgd, BASE_CCY)}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="space-y-0.5">
-                        {syms.slice(0, 3).map(([s, info]) => (
-                          <div key={s} className="flex items-center justify-between text-xs">
-                            <div className="flex items-center gap-1.5 min-w-0">
-                              <span className="font-medium truncate leading-tight">{info.name || s}</span>
-                              {info.name && <span className="text-ink-faint tabular-nums text-xs leading-tight">{s}</span>}
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <span className="text-ink-faint tabular-nums text-xs">{info.events}×</span>
-                              <span className="tabular-nums text-warn font-medium">
-                                {sym} {info.total.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                              </span>
-                            </div>
-                          </div>
-                        ))}
-                        {syms.length > 3 && (
-                          <div className="text-xs text-ink-faint">+{syms.length - 3} more</div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+                    return (
+                      <Box key={ccy} sx={{ py: 1 }}>
+                        <Stack direction="row" sx={{ justifyContent: "space-between", alignItems: "center", gap: 1, mb: 0.75 }}>
+                          <Stack direction="row" spacing={0.75} sx={{ alignItems: "center", minWidth: 0 }}>
+                            <Box sx={{ width: 7, height: 7, borderRadius: 0.75, bgcolor: colorForCcy(ccy), flexShrink: 0 }} />
+                            <Typography variant="body2" sx={{ fontWeight: 700 }}>{ccy}</Typography>
+                            <Typography variant="caption" color="text.secondary" noWrap>· {syms.length} payers · {eventCount} events</Typography>
+                          </Stack>
+                          <Box sx={{ textAlign: "right", flexShrink: 0 }}><Typography variant="body2" sx={{ fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{sym} {ccyTotal.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Typography><Typography variant="caption" color="warning.main" sx={{ fontVariantNumeric: "tabular-nums" }}>= {fmtMoneyFull(ccyTotalSgd, BASE_CCY)}</Typography></Box>
+                        </Stack>
+                        <Stack spacing={0.5}>
+                          {syms.slice(0, 3).map(([s, info]) => (
+                            <Stack key={s} direction="row" sx={{ justifyContent: "space-between", alignItems: "center", gap: 1, minWidth: 0 }}><Typography variant="caption" sx={{ fontWeight: 650 }} noWrap>{info.name || s}{info.name && <Typography component="span" variant="caption" color="text.secondary"> {s}</Typography>}</Typography><Stack direction="row" spacing={1} sx={{ alignItems: "center", flexShrink: 0 }}><Typography variant="caption" color="text.secondary">{info.events}×</Typography><Typography variant="caption" color="warning.main" sx={{ fontWeight: 650, fontVariantNumeric: "tabular-nums" }}>{sym} {info.total.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Typography></Stack></Stack>
+                          ))}
+                          {syms.length > 3 && <Typography variant="caption" color="text.secondary">+{syms.length - 3} more</Typography>}
+                        </Stack>
+                      </Box>
+                    );
+                  })}
+              </Stack>
             </AccordionCard>
           )}
-        </div>
-      </div>
-    </div>
+        </Box>
+      </Box>
+    </Box>
+  );
+}
+
+function SideMetric({ label, value, detail, tone = "text.primary" }: { label: string; value: ReactNode; detail?: ReactNode; tone?: string }) {
+  return (
+    <Box sx={{ minWidth: 0, p: 1, border: 1, borderColor: "divider", bgcolor: "action.hover", borderRadius: 1.5 }}>
+      <Typography variant="caption" color="text.secondary" sx={{ display: "block", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em" }} noWrap>{label}</Typography>
+      <Typography variant="body2" color={tone} sx={{ mt: 0.35, fontWeight: 700, fontVariantNumeric: "tabular-nums" }} noWrap>{value}</Typography>
+      {detail && <Typography variant="caption" color={tone} sx={{ display: "block", mt: 0.15, fontVariantNumeric: "tabular-nums" }} noWrap>{detail}</Typography>}
+    </Box>
   );
 }
 
@@ -674,18 +583,15 @@ function AccordionCard({
   children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-lg border border-line bg-bg-card overflow-hidden">
-      <button
-        onClick={onToggle}
-        aria-expanded={open}
-        className="w-full px-3 py-2 flex items-center gap-2 text-left hover:bg-bg-soft/40 transition-colors"
-      >
-        {icon}
-        <h2 className="text-sm font-medium flex-1">{title}</h2>
-        {badge && <span className="text-xs text-ink-faint">{badge}</span>}
-        {open ? <ChevronUp size={14} className="text-ink-faint" /> : <ChevronDown size={14} className="text-ink-faint" />}
-      </button>
-      {open && <div className="px-3 pb-3 pt-1 border-t border-line/50">{children}</div>}
-    </div>
+    <Accordion expanded={open} onChange={(_, expanded) => { if (expanded !== open) onToggle(); }} disableGutters>
+      <AccordionSummary expandIcon={<ExpandMoreRounded />} sx={{ minHeight: 46, "& .MuiAccordionSummary-content": { my: 1 } }}>
+        <Stack direction="row" spacing={1} sx={{ alignItems: "center", width: "100%" }}>
+          <Box sx={{ color: "warning.main", display: "flex" }}>{icon}</Box>
+          <Typography variant="body2" sx={{ fontWeight: 700, flex: 1 }}>{title}</Typography>
+          {badge && <Typography variant="caption" color="text.secondary">{badge}</Typography>}
+        </Stack>
+      </AccordionSummary>
+      <AccordionDetails sx={{ pt: 0.5, pb: 1.5 }}>{children}</AccordionDetails>
+    </Accordion>
   );
 }

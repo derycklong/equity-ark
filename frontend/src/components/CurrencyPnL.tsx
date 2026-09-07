@@ -1,5 +1,6 @@
+import { Box, Card, CardHeader, LinearProgress, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography } from "@mui/material";
+import PaidOutlined from "@mui/icons-material/PaidOutlined";
 import { fmtPct, fmtMoneyFull, ccySymbol } from "../lib/utils";
-import { Coins } from "lucide-react";
 import { useDashboard } from "../hooks/usePortfolio";
 
 interface BreakdownRow {
@@ -11,170 +12,141 @@ interface BreakdownRow {
   current_pnl: number | null;
   current_pnl_div: number | null;
   current_pnl_div_pct: number | null;
-  current_pnl_base: number | null;
-  current_pnl_div_base: number | null;
   closed_pnl: number | null;
-  closed_pnl_div: number | null;
-  closed_pnl_base: number | null;
-  closed_pnl_div_base: number | null;
   overall_pnl_div: number | null;
   overall_pnl_div_pct: number | null;
-  overall_pnl_div_base: number | null;
-  current_div: number | null;
-  current_div_base: number | null;
-  closed_div: number | null;
-  closed_div_base: number | null;
   total_div: number | null;
-  total_div_base: number | null;
-  current_value_base: number | null;
 }
 
 interface Breakdown {
   rows: BreakdownRow[];
-  totals: BreakdownRow;
+  totals: BreakdownRow & { current_value_base?: number | null };
   base_currency: string;
-  header: {
-    twr: number;
-    xirr: number;
-    capital: number;
-    net_worth: number;
-    base_currency: string;
-  };
+  header: { twr: number; xirr: number; capital: number; net_worth: number; base_currency: string };
 }
 
-const BASE_CCY = "SGD";
-
 const CCY_COLORS: Record<string, string> = {
-  USD: "bg-accent",
-  SGD: "bg-warn",
-  HKD: "bg-good",
-  GBP: "bg-bad",
-  CNY: "bg-info",
-  EUR: "bg-info",
+  USD: "primary.main",
+  SGD: "warning.main",
+  HKD: "success.main",
+  GBP: "error.main",
+  CNY: "secondary.main",
+  EUR: "info.main",
 };
 
 export default function CurrencyPnL() {
   const { data: dashboardData, isLoading } = useDashboard();
   const data = dashboardData?.breakdown as Breakdown | undefined;
 
-  if (isLoading) return <div className="text-ink-dim text-sm py-3">Loading…</div>;
+  if (isLoading) return <Typography variant="body2" color="text.secondary">Loading P&amp;L…</Typography>;
   if (!data) return null;
 
-  const ccy = data.base_currency;
-  const valColor = (n: number) => (n > 0 ? "text-good" : n < 0 ? "text-bad" : "text-ink-dim");
-  const maxPct = Math.max(...data.rows.map((r) => r.current_value_pct ?? 0), 1);
+  const baseCcy = data.base_currency;
+  const valueColor = (n: number) => (n > 0 ? "success.main" : n < 0 ? "error.main" : "text.secondary");
+  const maxPct = Math.max(...data.rows.map((row) => row.current_value_pct ?? 0), 1);
 
   return (
-    <div className="rounded-lg border border-line bg-bg-card overflow-hidden">
-      <div className="px-5 py-3 border-b border-line flex items-center justify-between bg-bg-soft/40">
-        <div className="flex items-center gap-2">
-          <Coins size={14} className="text-ink-faint" />
-          <h2 className="text-sm font-medium">P&L by currency</h2>
-        </div>
-      </div>
-
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-ink-faint text-sm uppercase border-b border-line bg-bg-soft/30">
-              <th className="text-left pl-3 sm:pl-5 pr-3 py-2 font-medium">Currency</th>
-              <th className="text-right px-3 py-2 font-medium">Market value</th>
-              <th className="text-right px-3 py-2 font-medium hidden sm:table-cell">Day</th>
-              <th className="text-right px-3 py-2 font-medium hidden sm:table-cell">Unrealized</th>
-              <th className="text-right px-3 py-2 font-medium hidden sm:table-cell">Realized</th>
-              <th className="text-right px-3 py-2 font-medium hidden sm:table-cell">Dividends</th>
-              <th className="text-right pr-3 sm:pr-5 pl-3 py-2 font-medium">Total P&L</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.rows.map((r) => {
-              const mv = r.current_value ?? 0;
-              const mvPct = (r.current_value_pct ?? 0) / maxPct;
-              const day = r.day_change ?? 0;
-              const dayPct = r.day_change_pct ?? 0;
-              const unreal = r.current_pnl ?? 0;
-              const real = r.closed_pnl ?? 0;
-              const div = r.total_div ?? 0;
-              const total = r.overall_pnl_div ?? 0;
-              const overallPct = r.overall_pnl_div_pct ?? 0;
-              const sym = ccySymbol(r.currency);
+    <Card variant="outlined" sx={{ overflow: "hidden" }}>
+      <CardHeader
+        avatar={<PaidOutlined fontSize="small" color="primary" />}
+        title="P&amp;L by currency"
+        titleTypographyProps={{ variant: "subtitle2", fontWeight: 700 }}
+        sx={{ px: { xs: 1.25, sm: 2 }, py: { xs: 0.9, sm: 1.25 }, bgcolor: "action.hover", borderBottom: 1, borderColor: "divider", "& .MuiCardHeader-avatar": { mr: { xs: 0.75, sm: 1.5 } } }}
+      />
+      <Box sx={{ display: { xs: "grid", sm: "none" }, gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 0.75, p: 1 }}>
+        {data.rows.map((row) => {
+          const marketValue = row.current_value ?? 0;
+          const total = row.overall_pnl_div ?? 0;
+          const color = CCY_COLORS[row.currency] || "text.secondary";
+          return (
+            <Box key={row.currency} sx={{ minWidth: 0, p: 1, border: 1, borderColor: "divider", borderRadius: 1.5, bgcolor: "background.paper" }}>
+              <Stack direction="row" sx={{ alignItems: "center", justifyContent: "space-between", gap: 0.5 }}>
+                <Stack direction="row" spacing={0.5} sx={{ alignItems: "center", minWidth: 0 }}>
+                  <Box sx={{ width: 7, height: 7, borderRadius: "50%", bgcolor: color, flexShrink: 0 }} />
+                  <Typography variant="caption" sx={{ fontWeight: 750 }}>{row.currency}</Typography>
+                </Stack>
+                <Typography variant="caption" color="text.secondary" sx={{ fontVariantNumeric: "tabular-nums" }}>{fmtPct(row.current_value_pct ?? 0, 1)}</Typography>
+              </Stack>
+              <Typography variant="body2" sx={{ mt: 0.5, fontWeight: 700, fontVariantNumeric: "tabular-nums" }} noWrap>{fmtMoneyFull(marketValue, row.currency)}</Typography>
+              <Stack direction="row" sx={{ justifyContent: "space-between", alignItems: "baseline", gap: 0.5, mt: 0.25 }}>
+                <Typography variant="caption" color="text.secondary">Total P&amp;L</Typography>
+                <Typography variant="caption" color={valueColor(total)} sx={{ fontWeight: 750, fontVariantNumeric: "tabular-nums" }} noWrap>{fmtMoneyFull(total, row.currency)}</Typography>
+              </Stack>
+            </Box>
+          );
+        })}
+        <Box sx={{ gridColumn: "1 / -1", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1, p: 1, borderTop: 2, borderColor: "divider", bgcolor: "action.hover" }}>
+          <Box sx={{ minWidth: 0 }}>
+            <Typography variant="caption" color="text.secondary">Total market value · {baseCcy}</Typography>
+            <Typography variant="body2" sx={{ fontWeight: 750, fontVariantNumeric: "tabular-nums" }} noWrap>{fmtMoneyFull(data.totals.current_value ?? 0, baseCcy)}</Typography>
+          </Box>
+          <Box sx={{ minWidth: 0, textAlign: "right" }}>
+            <Typography variant="caption" color="text.secondary">Total P&amp;L</Typography>
+            <Typography variant="body2" color={valueColor(data.totals.overall_pnl_div ?? 0)} sx={{ fontWeight: 750, fontVariantNumeric: "tabular-nums" }} noWrap>{fmtMoneyFull(data.totals.overall_pnl_div ?? 0, baseCcy)}</Typography>
+          </Box>
+        </Box>
+      </Box>
+      <TableContainer sx={{ overflowX: "auto", display: { xs: "none", sm: "block" } }}>
+        <Table size="small" sx={{ minWidth: 700 }}>
+          <TableHead>
+            <TableRow>
+              <TableCell>Currency</TableCell>
+              <TableCell align="right">Market value</TableCell>
+              <TableCell align="right" sx={{ display: { xs: "none", sm: "table-cell" } }}>Day</TableCell>
+              <TableCell align="right" sx={{ display: { xs: "none", sm: "table-cell" } }}>Unrealized</TableCell>
+              <TableCell align="right" sx={{ display: { xs: "none", sm: "table-cell" } }}>Realized</TableCell>
+              <TableCell align="right" sx={{ display: { xs: "none", sm: "table-cell" } }}>Dividends</TableCell>
+              <TableCell align="right">Total P&amp;L</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {data.rows.map((row) => {
+              const marketValue = row.current_value ?? 0;
+              const day = row.day_change ?? 0;
+              const unrealized = row.current_pnl ?? 0;
+              const realized = row.closed_pnl ?? 0;
+              const dividends = row.total_div ?? 0;
+              const total = row.overall_pnl_div ?? 0;
+              const color = CCY_COLORS[row.currency] || "text.secondary";
               return (
-                <tr key={r.currency} className="border-b border-line/50 hover:bg-bg-soft/40 transition-colors">
-                  <td className="pl-3 sm:pl-5 pr-3 py-3 align-middle">
-                    <div className="flex items-center gap-2">
-                      <div className={`w-2 h-2 rounded-full ${CCY_COLORS[r.currency] || "bg-ink-faint"}`} />
-                      <div>
-                        <div className="font-semibold text-sm leading-tight">{r.currency}</div>
-                        <div className="text-sm text-ink-faint tabular-nums">
-                          {fmtPct(r.current_value_pct ?? 0, 1)} of portfolio
-                        </div>
-                      </div>
-                    </div>
-                    <div className="mt-1.5 h-0.5 rounded bg-bg-soft overflow-hidden">
-                      <div
-                        className={`h-full ${CCY_COLORS[r.currency] || "bg-ink-faint"} opacity-60`}
-                        style={{ width: `${Math.max(mvPct * 100, 2)}%` }}
-                      />
-                    </div>
-                  </td>
-                  <td className="px-3 py-3 text-right tabular-nums align-middle">
-                    <div className="font-semibold">{fmtMoneyFull(mv, r.currency)}</div>
-                  </td>
-                  <td className={`px-3 py-3 text-right tabular-nums align-middle hidden sm:table-cell ${valColor(day)}`}>
-                    <div>{fmtMoneyFull(day, r.currency)}</div>
-                    <div className="text-sm mt-0.5">{fmtPct(dayPct, 2)}</div>
-                  </td>
-                  <td className={`px-3 py-3 text-right tabular-nums align-middle hidden sm:table-cell ${valColor(unreal)}`}>
-                    {fmtMoneyFull(unreal, r.currency)}
-                  </td>
-                  <td className={`px-3 py-3 text-right tabular-nums align-middle hidden sm:table-cell ${valColor(real)}`}>
-                    {fmtMoneyFull(real, r.currency)}
-                  </td>
-                  <td className="px-3 py-3 text-right tabular-nums align-middle hidden sm:table-cell">
-                    <span className={valColor(div)}>{fmtMoneyFull(div, r.currency)}</span>
-                  </td>
-                  <td className={`pr-3 sm:pr-5 pl-3 py-3 text-right tabular-nums align-middle ${valColor(total)}`}>
-                    <div className="font-semibold">{fmtMoneyFull(total, r.currency)}</div>
-                    <div className="text-sm mt-0.5">{fmtPct(overallPct, 1)}</div>
-                  </td>
-                </tr>
+                <TableRow key={row.currency} hover>
+                  <TableCell>
+                    <Stack spacing={0.5}>
+                      <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+                        <Box sx={{ width: 8, height: 8, borderRadius: 1, bgcolor: color, flexShrink: 0 }} />
+                        <Typography variant="body2" sx={{ fontWeight: 700 }}>{row.currency}</Typography>
+                        <Typography variant="caption" color="text.secondary">{fmtPct(row.current_value_pct ?? 0, 1)}</Typography>
+                      </Stack>
+                      <LinearProgress variant="determinate" value={Math.max(Math.min(((row.current_value_pct ?? 0) / maxPct) * 100, 100), 2)} sx={{ height: 3, borderRadius: 2, bgcolor: "action.hover", "& .MuiLinearProgress-bar": { bgcolor: color } }} />
+                    </Stack>
+                  </TableCell>
+                  <TableCell align="right"><Typography variant="body2" sx={{ fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{fmtMoneyFull(marketValue, row.currency)}</Typography></TableCell>
+                  <TableCell align="right" sx={{ display: { xs: "none", sm: "table-cell" }, color: valueColor(day), fontVariantNumeric: "tabular-nums" }}>
+                    <Typography variant="body2" color="inherit" sx={{ fontVariantNumeric: "tabular-nums" }}>{fmtMoneyFull(day, row.currency)}</Typography>
+                    <Typography variant="caption" color="inherit">{fmtPct(row.day_change_pct ?? 0, 2)}</Typography>
+                  </TableCell>
+                  <TableCell align="right" sx={{ display: { xs: "none", sm: "table-cell" }, color: valueColor(unrealized), fontVariantNumeric: "tabular-nums" }}>{fmtMoneyFull(unrealized, row.currency)}</TableCell>
+                  <TableCell align="right" sx={{ display: { xs: "none", sm: "table-cell" }, color: valueColor(realized), fontVariantNumeric: "tabular-nums" }}>{fmtMoneyFull(realized, row.currency)}</TableCell>
+                  <TableCell align="right" sx={{ display: { xs: "none", sm: "table-cell" }, color: valueColor(dividends), fontVariantNumeric: "tabular-nums" }}>{fmtMoneyFull(dividends, row.currency)}</TableCell>
+                  <TableCell align="right" sx={{ color: valueColor(total), fontVariantNumeric: "tabular-nums" }}>
+                    <Typography variant="body2" color="inherit" sx={{ fontWeight: 700 }}>{fmtMoneyFull(total, row.currency)}</Typography>
+                    <Typography variant="caption" color="inherit">{fmtPct(row.overall_pnl_div_pct ?? 0, 1)}</Typography>
+                  </TableCell>
+                </TableRow>
               );
             })}
-            {/* Totals row - in base currency */}
-            <tr className="border-t-2 border-line bg-bg-soft/60 font-semibold">
-              <td className="pl-3 sm:pl-5 pr-3 py-3 align-middle">
-                <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-sm bg-ink-dim" />
-                  <div>
-                    <div className="text-sm leading-tight">Total ({ccy})</div>
-                    <div className="text-sm text-ink-faint">100% of portfolio</div>
-                  </div>
-                </div>
-              </td>
-              <td className="px-3 py-3 text-right tabular-nums align-middle">
-                <div className="text-base">{fmtMoneyFull(data.totals.current_value ?? 0, ccy)}</div>
-              </td>
-              <td className={`px-3 py-3 text-right tabular-nums align-middle hidden sm:table-cell ${valColor(data.totals.day_change ?? 0)}`}>
-                <div className="text-base">{fmtMoneyFull(data.totals.day_change ?? 0, ccy)}</div>
-                <div className="text-sm mt-0.5">{fmtPct(data.totals.day_change_pct ?? 0, 2)}</div>
-              </td>
-              <td className={`px-3 py-3 text-right tabular-nums align-middle hidden sm:table-cell ${valColor(data.totals.current_pnl ?? 0)}`}>
-                {fmtMoneyFull(data.totals.current_pnl ?? 0, ccy)}
-              </td>
-              <td className={`px-3 py-3 text-right tabular-nums align-middle hidden sm:table-cell ${valColor(data.totals.closed_pnl ?? 0)}`}>
-                {fmtMoneyFull(data.totals.closed_pnl ?? 0, ccy)}
-              </td>
-              <td className="px-3 py-3 text-right tabular-nums align-middle hidden sm:table-cell">
-                <span className={valColor(data.totals.total_div ?? 0)}>{fmtMoneyFull(data.totals.total_div ?? 0, ccy)}</span>
-              </td>
-              <td className={`pr-3 sm:pr-5 pl-3 py-3 text-right tabular-nums align-middle ${valColor(data.totals.overall_pnl_div ?? 0)}`}>
-                <div className="text-base">{fmtMoneyFull(data.totals.overall_pnl_div ?? 0, ccy)}</div>
-                <div className="text-sm mt-0.5">{fmtPct(data.totals.overall_pnl_div_pct ?? 0, 1)}</div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
+            <TableRow sx={{ bgcolor: "action.hover", "& td": { borderTop: 2, borderColor: "divider" } }}>
+              <TableCell><Typography variant="body2" sx={{ fontWeight: 700 }}>Total ({baseCcy})</Typography><Typography variant="caption" color="text.secondary">100% of portfolio</Typography></TableCell>
+              <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}><Typography sx={{ fontWeight: 700 }}>{fmtMoneyFull(data.totals.current_value ?? 0, baseCcy)}</Typography></TableCell>
+              <TableCell align="right" sx={{ display: { xs: "none", sm: "table-cell" }, color: valueColor(data.totals.day_change ?? 0), fontVariantNumeric: "tabular-nums" }}>{fmtMoneyFull(data.totals.day_change ?? 0, baseCcy)}<Typography variant="caption" sx={{ display: "block" }} color="inherit">{fmtPct(data.totals.day_change_pct ?? 0, 2)}</Typography></TableCell>
+              <TableCell align="right" sx={{ display: { xs: "none", sm: "table-cell" }, color: valueColor(data.totals.current_pnl ?? 0), fontVariantNumeric: "tabular-nums" }}>{fmtMoneyFull(data.totals.current_pnl ?? 0, baseCcy)}</TableCell>
+              <TableCell align="right" sx={{ display: { xs: "none", sm: "table-cell" }, color: valueColor(data.totals.closed_pnl ?? 0), fontVariantNumeric: "tabular-nums" }}>{fmtMoneyFull(data.totals.closed_pnl ?? 0, baseCcy)}</TableCell>
+              <TableCell align="right" sx={{ display: { xs: "none", sm: "table-cell" }, color: valueColor(data.totals.total_div ?? 0), fontVariantNumeric: "tabular-nums" }}>{fmtMoneyFull(data.totals.total_div ?? 0, baseCcy)}</TableCell>
+              <TableCell align="right" sx={{ color: valueColor(data.totals.overall_pnl_div ?? 0), fontVariantNumeric: "tabular-nums" }}><Typography sx={{ fontWeight: 700 }} color="inherit">{fmtMoneyFull(data.totals.overall_pnl_div ?? 0, baseCcy)}</Typography><Typography variant="caption" sx={{ display: "block" }} color="inherit">{fmtPct(data.totals.overall_pnl_div_pct ?? 0, 1)}</Typography></TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
+      </TableContainer>
+    </Card>
   );
 }

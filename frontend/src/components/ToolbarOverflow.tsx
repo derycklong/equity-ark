@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { MoreHorizontal } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { Box, IconButton, Menu, Stack, Tooltip } from "@mui/material";
+import MoreHorizRounded from "@mui/icons-material/MoreHorizRounded";
 import { cn } from "../lib/utils";
 
 interface ToolbarOverflowProps {
@@ -9,76 +10,51 @@ interface ToolbarOverflowProps {
    */
   primary: ReactNode;
   /**
-   * Items collapsed into a `⋯` dropdown on small screens. On md+ these
-   * are also rendered inline to the right of `primary`.
+   * Items collapsed into a `⋯` dropdown on every screen.
    */
   secondary?: ReactNode;
   className?: string;
-  secondaryClassName?: string;
 }
 
 /**
  * Toolbar that keeps the primary action(s) visible on every screen and
- * collapses secondary actions into a `⋯` menu on small screens. On md+
- * everything is shown inline (so the desktop layout is unchanged).
+ * collapses secondary actions into a `⋯` menu on every screen, keeping the
+ * toolbar focused on its primary action.
  */
 export default function ToolbarOverflow({
   primary,
   secondary,
   className,
-  secondaryClassName,
 }: ToolbarOverflowProps) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
+  const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
+  const open = Boolean(anchorEl);
 
   return (
-    <div className={cn("flex items-center gap-2 flex-wrap", className)}>
-      <div className="flex items-center gap-2 flex-wrap">{primary}</div>
+    <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap", alignItems: "center", width: { xs: "100%", sm: "auto" } }} className={cn(className)}>
+      <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap", alignItems: "center", minWidth: 0, flex: { xs: 1, sm: "initial" } }}>{primary}</Stack>
       {secondary && (
-        <>
-          <div className={cn("hidden md:flex items-center gap-2 flex-wrap", secondaryClassName)}>
-            {secondary}
-          </div>
-          <div className="relative md:hidden" ref={ref}>
-            <button
-              type="button"
-              onClick={() => setOpen((o) => !o)}
-              aria-label="More actions"
-              aria-expanded={open}
-              className="flex items-center justify-center rounded-md border border-line bg-bg-card text-ink-dim hover:text-ink p-1.5"
+        <Box sx={{ display: "block", flexShrink: 0 }}>
+            <Tooltip title="More actions">
+              <IconButton
+                size="small"
+                onClick={(event) => setAnchorEl(event.currentTarget)}
+                aria-label="More actions"
+                aria-expanded={open}
+                sx={{ border: 1, borderColor: "divider" }}
+              >
+                <MoreHorizRounded fontSize="small" />
+              </IconButton>
+            </Tooltip>
+            <Menu
+              anchorEl={anchorEl}
+              open={open}
+              onClose={() => setAnchorEl(null)}
+              slotProps={{ paper: { sx: { minWidth: 220, mt: 0.5, p: 0.5 } } }}
             >
-              <MoreHorizontal size={16} />
-            </button>
-            {open && (
-              // Anchor the dropdown to the LEFT edge of the ⋯ button so it
-              // opens to the RIGHT and stays inside the viewport when the
-              // toolbar is left-aligned (the common mobile layout). Cap the
-              // width so it never overflows the right edge either.
-              <div className="absolute left-0 top-full mt-1 z-30 min-w-[180px] max-w-[calc(100vw-1rem)] rounded-lg border border-line bg-bg-card shadow-lg py-1">
-                <div className="flex flex-col" onClick={() => setOpen(false)}>
-                  {secondary}
-                </div>
-              </div>
-            )}
-          </div>
-        </>
+              <Box onClick={() => setAnchorEl(null)} sx={{ display: "flex", flexDirection: "column", gap: 0.25 }}>{secondary}</Box>
+            </Menu>
+        </Box>
       )}
-    </div>
+    </Stack>
   );
 }

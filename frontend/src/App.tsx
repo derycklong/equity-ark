@@ -1,10 +1,45 @@
-import { Link, NavLink, Outlet, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { useEffect, useState, type ElementType } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { LayoutDashboard, Briefcase, History, Coins, Sparkles, Repeat2, Database, LogOut, Menu, X, Sun, Moon, Shield } from "lucide-react";
-import { useEffect, useState } from "react";
+import {
+  Alert,
+  AppBar,
+  Avatar,
+  Box,
+  Button,
+  Divider,
+  Drawer,
+  IconButton,
+  List,
+  ListItemButton,
+  ListItemIcon,
+  ListItemText,
+  Snackbar,
+  Stack,
+  Toolbar,
+  Tooltip,
+  Typography,
+  useMediaQuery,
+  useTheme as useMuiTheme,
+} from "@mui/material";
+import { alpha } from "@mui/material/styles";
+import DashboardOutlined from "@mui/icons-material/DashboardOutlined";
+import AccountBalanceWalletOutlined from "@mui/icons-material/AccountBalanceWalletOutlined";
+import ReceiptLongOutlined from "@mui/icons-material/ReceiptLongOutlined";
+import CompareArrowsOutlined from "@mui/icons-material/CompareArrowsOutlined";
+import PaidOutlined from "@mui/icons-material/PaidOutlined";
+import AutoAwesomeOutlined from "@mui/icons-material/AutoAwesomeOutlined";
+import StorageOutlined from "@mui/icons-material/StorageOutlined";
+import LogoutOutlined from "@mui/icons-material/LogoutOutlined";
+import MenuRounded from "@mui/icons-material/MenuRounded";
+import CloseRounded from "@mui/icons-material/CloseRounded";
+import LightModeOutlined from "@mui/icons-material/LightModeOutlined";
+import DarkModeOutlined from "@mui/icons-material/DarkModeOutlined";
+import AdminPanelSettingsOutlined from "@mui/icons-material/AdminPanelSettingsOutlined";
+import RefreshRounded from "@mui/icons-material/RefreshRounded";
+import { Link, NavLink, Outlet, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { api } from "./lib/api";
 import { useStore } from "./stores/useStore";
-import { cn, timeAgo } from "./lib/utils";
+import { timeAgo } from "./lib/utils";
 import { useDashboard } from "./hooks/usePortfolio";
 import Logo from "./components/Logo";
 import { useTheme } from "./hooks/useTheme";
@@ -20,42 +55,52 @@ import Admin from "./pages/Admin";
 import { RequireAuth } from "./components/RequireAuth";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 
-const navItems = [
-  { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
-  { to: "/holdings", label: "Holdings", icon: Briefcase },
-  { to: "/transactions", label: "Transactions", icon: History },
-  { to: "/roundtrips", label: "Roundtrips", icon: Repeat2 },
-  { to: "/dividends", label: "Dividends", icon: Coins },
-  { to: "/advice", label: "Advice", icon: Sparkles },
+const DRAWER_WIDTH = 256;
+
+const navItems: { to: string; label: string; icon: ElementType; end?: boolean }[] = [
+  { to: "/", label: "Dashboard", icon: DashboardOutlined, end: true },
+  { to: "/holdings", label: "Holdings", icon: AccountBalanceWalletOutlined },
+  { to: "/transactions", label: "Transactions", icon: ReceiptLongOutlined },
+  { to: "/roundtrips", label: "Roundtrips", icon: CompareArrowsOutlined },
+  { to: "/dividends", label: "Dividends", icon: PaidOutlined },
+  { to: "/advice", label: "Advice", icon: AutoAwesomeOutlined },
 ];
 
-function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
+type Notice = { message: string; severity: "success" | "error" | "info" };
+
+function SidebarContent({
+  onNavigate,
+  onNotify,
+}: {
+  onNavigate?: () => void;
+  onNotify: (notice: Notice) => void;
+}) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const user = useStore((s) => s.user);
   const setUser = useStore((s) => s.setUser);
   const { theme, toggleTheme } = useTheme();
+  const muiTheme = useMuiTheme();
+  const location = useLocation();
   const [cacheRefreshing, setCacheRefreshing] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
-  // Subscribe to the dashboard query purely for the cache timestamp. The
-  // query is shared with the Dashboard page (same key), so this doesn't
-  // add a network request when the dashboard has already loaded.
   const dashboard = useDashboard();
 
-  // Admin link is only rendered for users marked `is_admin` in /api/auth/me.
-  const items = user?.is_admin
-    ? [...navItems, { to: "/admin", label: "Admin", icon: Shield }]
+  const items: typeof navItems = user?.is_admin
+    ? [...navItems, { to: "/admin", label: "Admin", icon: AdminPanelSettingsOutlined }]
     : navItems;
 
   async function onCacheRefresh() {
     setCacheRefreshing(true);
     try {
-      const r = await api.cacheRefresh();
+      const result = await api.cacheRefresh();
       qc.invalidateQueries();
-      console.log(`Cache refreshed: ${r.prices_updated} prices, ${r.dividends_refreshed} dividend symbols`);
-    } catch (e) {
-      console.error(e);
-      alert("Failed to refresh: " + (e as Error).message);
+      onNotify({
+        severity: "success",
+        message: `Refreshed ${result.prices_updated} prices and ${result.dividends_refreshed} dividend symbols`,
+      });
+    } catch (error) {
+      onNotify({ severity: "error", message: `Refresh failed: ${(error as Error).message}` });
     } finally {
       setCacheRefreshing(false);
     }
@@ -65,183 +110,198 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
     setLoggingOut(true);
     try {
       await api.authLogout();
-    } catch {}
+    } catch {
+      // The local session is still cleared if the server is unavailable.
+    }
     setUser(null);
     setLoggingOut(false);
     navigate("/login", { replace: true });
   }
 
-  function handleNav() {
-    onNavigate?.();
-  }
-
   return (
-    <aside className="w-60 border-r border-line bg-bg-soft p-4 flex flex-col shrink-0 h-full">
-      <div className="mb-4 flex items-center justify-between">
-        <Link to="/" onClick={handleNav}>
+    <Box sx={{ height: "100%", display: "flex", flexDirection: "column", p: 2 }}>
+      <Stack direction="row" sx={{ mb: 2.5, alignItems: "center", justifyContent: "space-between" }}>
+        <Link to="/" onClick={onNavigate} style={{ color: "inherit", textDecoration: "none" }}>
           <Logo size="sm" />
         </Link>
-        <button
-          onClick={toggleTheme}
-          title={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
-          aria-label="Toggle theme"
-          className="p-1.5 rounded-md text-ink-faint hover:text-ink hover:bg-bg-card border border-line/60"
-        >
-          {theme === "light" ? <Moon size={14} /> : <Sun size={14} />}
-        </button>
-      </div>
-      <nav className="flex flex-col gap-1 flex-1">
+        <Tooltip title={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}>
+          <IconButton
+            size="small"
+            onClick={toggleTheme}
+            aria-label="Toggle theme"
+            sx={{ border: 1, borderColor: "divider", color: "text.secondary" }}
+          >
+            {theme === "light" ? <DarkModeOutlined fontSize="small" /> : <LightModeOutlined fontSize="small" />}
+          </IconButton>
+        </Tooltip>
+      </Stack>
+
+      <List disablePadding sx={{ display: "flex", flexDirection: "column", gap: 0.25, flex: 1, alignItems: "stretch" }}>
         {items.map(({ to, label, icon: Icon, end }) => (
-          <NavLink
+          <ListItemButton
             key={to}
+            component={NavLink}
             to={to}
             end={end}
-            onClick={handleNav}
-            className={({ isActive }) =>
-              cn(
-                "flex items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-bg-card",
-                isActive && "bg-bg-card text-ink"
-              )
-            }
+            onClick={onNavigate}
+            className={(end ? location.pathname === to : location.pathname.startsWith(to)) ? "nav-item-active" : undefined}
+            aria-current={(end ? location.pathname === to : location.pathname.startsWith(to)) ? "page" : undefined}
+            sx={{
+              flex: "0 0 36px",
+              height: 36,
+              minHeight: 36,
+              maxHeight: 36,
+              borderRadius: 1.5,
+              px: 1.25,
+              color: "text.secondary",
+              "&:hover": { bgcolor: alpha(muiTheme.palette.primary.main, 0.08), color: "text.primary" },
+              "&.nav-item-active": {
+                bgcolor: alpha(muiTheme.palette.primary.main, muiTheme.palette.mode === "dark" ? 0.16 : 0.1),
+                color: "primary.main",
+                "& .MuiListItemIcon-root": { color: "primary.main" },
+              },
+            }}
           >
-            <Icon size={16} />
-            {label}
-          </NavLink>
+            <ListItemIcon sx={{ minWidth: 32, color: "inherit" }}>
+              <Icon sx={{ fontSize: 18 }} />
+            </ListItemIcon>
+            <ListItemText primary={label} sx={{ "& .MuiListItemText-primary": { fontSize: "0.75rem", fontWeight: 650 } }} />
+          </ListItemButton>
         ))}
-      </nav>
-      <div className="flex flex-col gap-2 pt-4 border-t border-line text-xs">
-        <button
+      </List>
+
+      <Divider sx={{ my: 1.5 }} />
+
+      <Stack spacing={1}>
+        <Button
+          fullWidth
+          size="small"
+          variant="outlined"
+          color="inherit"
           onClick={onCacheRefresh}
           disabled={cacheRefreshing}
-          className="flex items-center gap-2 rounded-md border border-line px-3 py-2 hover:bg-bg-card disabled:opacity-50"
-          title="Re-fetch prices, dividends, and rebuild dashboard cache"
+          startIcon={<RefreshRounded className={cacheRefreshing ? "spin-icon" : undefined} />}
+          sx={{ justifyContent: "flex-start", color: "text.secondary", borderColor: "divider", minHeight: 30, py: 0.25, px: 1, fontSize: "0.72rem", "& .MuiButton-startIcon": { mr: 0.75 }, "& .MuiSvgIcon-root": { fontSize: 16 } }}
         >
-          <Database size={14} className={cacheRefreshing ? "animate-spin" : ""} />
-          {cacheRefreshing ? "Refreshing…" : "Refresh"}
-        </button>
+          {cacheRefreshing ? "Refreshing…" : "Refresh market data"}
+        </Button>
         {dashboard.data?.last_refreshed_at && (
-          <div
-            className="px-3 text-xs text-ink-faint"
-            title={`Dashboard cache was last rebuilt on ${new Date(
-              dashboard.data.last_refreshed_at * 1000,
-            ).toLocaleString()}`}
+          <Typography variant="caption" color="text.secondary" sx={{ px: 1 }}>
+            Updated {timeAgo(dashboard.data.last_refreshed_at)}
+          </Typography>
+        )}
+      </Stack>
+
+      {user && (
+        <>
+          <Divider sx={{ my: 1.5 }} />
+          <Stack direction="row" spacing={1.25} sx={{ px: 0.5, minWidth: 0, alignItems: "center" }}>
+            <Avatar src={user.picture || undefined} sx={{ width: 32, height: 32, bgcolor: "primary.main", color: "primary.contrastText", fontSize: 13 }}>
+              {(user.name || user.email || "?").slice(0, 1).toUpperCase()}
+            </Avatar>
+            <Box sx={{ minWidth: 0, flex: 1 }}>
+              <Typography variant="body2" noWrap sx={{ fontWeight: 650 }}>{user.name || user.email}</Typography>
+              {user.name && <Typography variant="caption" color="text.secondary" noWrap sx={{ display: "block" }}>{user.email}</Typography>}
+            </Box>
+          </Stack>
+          <Button
+            fullWidth
+            size="small"
+            variant="text"
+            color="inherit"
+            onClick={onLogout}
+            disabled={loggingOut}
+            startIcon={<LogoutOutlined fontSize="small" />}
+            sx={{ mt: 0.75, color: "text.secondary", minHeight: 30, py: 0.25, fontSize: "0.72rem", "& .MuiButton-startIcon": { mr: 0.75 }, "& .MuiSvgIcon-root": { fontSize: 16 } }}
           >
-            Last refresh:{" "}
-            <span className="tabular-nums">
-              {timeAgo(dashboard.data.last_refreshed_at)}
-            </span>
-          </div>
-        )}
-        {user && (
-          <div className="mt-2 pt-2 border-t border-line">
-            <div className="flex items-center gap-2 px-1 py-1">
-              {user.picture ? (
-                <img src={user.picture} alt="" className="w-6 h-6 rounded-full" referrerPolicy="no-referrer" />
-              ) : (
-                <div className="w-6 h-6 rounded-full bg-accent text-bg flex items-center justify-center text-[11px] font-semibold">
-                  {(user.name || user.email || "?").slice(0, 1).toUpperCase()}
-                </div>
-              )}
-              <div className="flex-1 min-w-0">
-                <div className="text-ink truncate text-[11px] font-medium">{user.name || user.email}</div>
-                {user.name && <div className="text-ink-faint truncate text-xs">{user.email}</div>}
-              </div>
-            </div>
-            <button
-              onClick={onLogout}
-              disabled={loggingOut}
-              className="w-full mt-1 flex items-center justify-center gap-2 rounded-md border border-line px-3 py-2 hover:bg-bg-card disabled:opacity-50"
-            >
-              <LogOut size={12} />
-              {loggingOut ? "Signing out…" : "Sign out"}
-            </button>
-          </div>
-        )}
-      </div>
-    </aside>
+            {loggingOut ? "Signing out…" : "Sign out"}
+          </Button>
+        </>
+      )}
+    </Box>
   );
 }
 
 function AuthedLayout() {
   const loc = useLocation();
+  const muiTheme = useMuiTheme();
+  const isMobile = useMediaQuery(muiTheme.breakpoints.down("md"));
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const pageLabel = loc.pathname === "/" ? "Overview" : navItems.find((item) => loc.pathname.startsWith(item.to) && item.to !== "/")?.label || (loc.pathname.startsWith("/admin") ? "Admin" : "Portfolio");
 
   useEffect(() => {
     setDrawerOpen(false);
   }, [loc.pathname]);
 
-  useEffect(() => {
-    if (!drawerOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setDrawerOpen(false);
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [drawerOpen]);
+  const sidebar = <SidebarContent onNavigate={() => setDrawerOpen(false)} onNotify={setNotice} />;
 
   return (
-    <div className="flex h-full">
-      <div className="md:hidden fixed top-0 left-0 right-0 z-30 h-12 px-3 flex items-center gap-2 border-b border-line bg-bg-soft">
-        <button
-          onClick={() => setDrawerOpen(true)}
-          aria-label="Open menu"
-          className="rounded-md p-1.5 hover:bg-bg-card"
+    <Box sx={{ display: "flex", height: "100%", minHeight: 0 }}>
+      {isMobile ? (
+        <Drawer
+          open={drawerOpen}
+          onClose={() => setDrawerOpen(false)}
+          ModalProps={{ keepMounted: true }}
+          sx={{ "& .MuiDrawer-paper": { width: DRAWER_WIDTH, boxSizing: "border-box" } }}
         >
-          <Menu size={18} />
-        </button>
-        <Link to="/">
-          <Logo size="sm" showText={false} />
-        </Link>
-      </div>
-
-      {/* Desktop sidebar — always visible at md+ */}
-      <div className="hidden md:flex shrink-0">
-        <Sidebar />
-      </div>
-
-      {/* Mobile drawer — slides in from the left */}
-      {drawerOpen && (
-        <div className="md:hidden fixed inset-0 z-40">
-          <div
-            className="absolute inset-0 bg-black/60"
-            onClick={() => setDrawerOpen(false)}
-          />
-          <div className="absolute top-0 left-0 bottom-0 w-64 bg-bg-soft border-r border-line shadow-xl flex flex-col">
-            <div className="flex items-center justify-end px-3 pt-2">
-              <button
-                onClick={() => setDrawerOpen(false)}
-                aria-label="Close menu"
-                className="rounded-md p-1.5 hover:bg-bg-card"
-              >
-                <X size={18} />
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto">
-              <Sidebar onNavigate={() => setDrawerOpen(false)} />
-            </div>
-          </div>
-        </div>
+          <Stack direction="row" sx={{ px: 1, pt: 1, justifyContent: "flex-end" }}>
+            <IconButton aria-label="Close menu" onClick={() => setDrawerOpen(false)}>
+              <CloseRounded />
+            </IconButton>
+          </Stack>
+          {sidebar}
+        </Drawer>
+      ) : (
+        <Drawer
+          variant="permanent"
+          open
+          sx={{
+            width: DRAWER_WIDTH,
+            flexShrink: 0,
+            "& .MuiDrawer-paper": { width: DRAWER_WIDTH, boxSizing: "border-box", position: "relative" },
+          }}
+        >
+          {sidebar}
+        </Drawer>
       )}
 
-      <main className="flex-1 overflow-auto w-full">
-        <div className="md:hidden h-12" aria-hidden="true" />
-        <div key={loc.pathname} className="p-3 sm:p-6 max-w-[1400px] mx-auto">
+      <Box component="main" sx={{ flex: 1, minWidth: 0, height: "100%", overflow: "auto", bgcolor: "background.default" }}>
+        {isMobile && (
+          <AppBar position="sticky" color="inherit" sx={{ display: { md: "none" }, zIndex: (theme) => theme.zIndex.drawer + 1 }}>
+            <Toolbar variant="dense" sx={{ minHeight: 60, px: { xs: 1.25, sm: 1.5 }, gap: 0.75 }}>
+              <IconButton aria-label="Open menu" onClick={() => setDrawerOpen(true)} edge="start">
+                <MenuRounded />
+              </IconButton>
+              <Link to="/" style={{ color: "inherit", textDecoration: "none" }}>
+                <Logo size="sm" showText={false} />
+              </Link>
+              <Typography variant="subtitle2" sx={{ ml: 0.25, fontWeight: 700 }}>{pageLabel}</Typography>
+              <Box sx={{ flex: 1 }} />
+            </Toolbar>
+          </AppBar>
+        )}
+        <Box key={loc.pathname} sx={{ width: "100%", maxWidth: 1400, mx: "auto", p: { xs: 1.25, sm: 3 }, pb: { xs: 4, sm: 3 } }}>
           <Outlet />
-        </div>
-      </main>
-    </div>
+        </Box>
+      </Box>
+
+      <Snackbar open={!!notice} autoHideDuration={5000} onClose={() => setNotice(null)} anchorOrigin={{ vertical: "bottom", horizontal: "right" }}>
+        <Alert onClose={() => setNotice(null)} severity={notice?.severity || "info"} variant="filled" sx={{ width: "100%" }}>
+          {notice?.message}
+        </Alert>
+      </Snackbar>
+    </Box>
   );
 }
 
 function PublicLayout() {
   return (
-    <div className="flex h-full">
-      <main className="flex-1 overflow-auto">
-        <div className="max-w-[1400px] mx-auto">
-          <Outlet />
-        </div>
-      </main>
-    </div>
+    <Box sx={{ height: "100%", overflow: "auto", bgcolor: "background.default" }}>
+      <Box sx={{ width: "100%", maxWidth: 1400, minHeight: "100%", mx: "auto" }}>
+        <Outlet />
+      </Box>
+    </Box>
   );
 }
 

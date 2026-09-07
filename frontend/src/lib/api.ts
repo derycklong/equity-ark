@@ -69,7 +69,7 @@ export const api = {
     label?: string;
     note?: string;
   }) =>
-    request<{ added: string; transactions: number; holdings: number; roundtrips: number }>(
+    request<{ added: string; id: number; transaction: any; transactions: number; holdings: number; roundtrips: number }>(
       "/api/portfolio/transactions",
       { method: "POST", body: JSON.stringify(tx) },
     ),
@@ -85,7 +85,7 @@ export const api = {
     label?: string;
     note?: string;
   }) =>
-    request<{ updated: number; symbol: string; transactions: number; holdings: number; roundtrips: number }>(
+    request<{ updated: number; symbol: string; transaction: any; transactions: number; holdings: number; roundtrips: number }>(
       `/api/portfolio/transactions/${id}`,
       { method: "PUT", body: JSON.stringify(tx) },
     ),

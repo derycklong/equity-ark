@@ -19,7 +19,7 @@ export default function Logo({ size = "md", showText = true }: LogoProps) {
         xmlns="http://www.w3.org/2000/svg"
       >
         {/* Dark background rounded square */}
-        <rect width="32" height="32" rx="8" fill="#0f172a" />
+        <rect width="32" height="32" rx="8" fill="var(--logo-bg, #0f172a)" />
 
         {/* Ark hull — represents the portfolio vessel */}
         <path

@@ -1,4 +1,5 @@
 import { type ReactNode } from "react";
+import { Box, Paper, Typography, useMediaQuery } from "@mui/material";
 import { cn } from "../lib/utils";
 
 interface MobileTableProps<T> {
@@ -32,24 +33,34 @@ export default function MobileTable<T>({
   tableWrapperClassName,
   empty,
 }: MobileTableProps<T>) {
+  const isDesktop = useMediaQuery((theme) => theme.breakpoints.up("md"), { noSsr: true });
+
   return (
-    <div className={className}>
-      {/* Mobile card list (hidden on md+) */}
-      <div className={cn("md:hidden space-y-2", cardsClassName)}>
-        {items.length === 0 && empty ? (
-          <div className="rounded-lg border border-line bg-bg-card px-4 py-8 text-center text-ink-faint text-sm">
-            {empty}
-          </div>
-        ) : (
-          items.map((item, i) => (
-            <div key={keyOf(item, i)}>{renderCard(item, i)}</div>
-          ))
-        )}
-      </div>
-      {/* Desktop / tablet table (hidden on small screens) */}
-      <div className={cn("hidden md:block md:min-h-0", tableWrapperClassName)}>
-        {renderTable()}
-      </div>
-    </div>
+    <Box className={className}>
+      {!isDesktop && (
+        <Box
+          className={cn("md:hidden", cardsClassName)}
+          sx={{ display: "flex", flexDirection: "column", gap: 1.5, p: { xs: 1, sm: 1.5 } }}
+        >
+          {items.length === 0 && empty ? (
+            <Paper variant="outlined" sx={{ px: 2, py: 4, textAlign: "center" }}>
+              <Typography variant="body2" color="text.secondary">{empty}</Typography>
+            </Paper>
+          ) : (
+            items.map((item, i) => (
+              <div key={keyOf(item, i)}>{renderCard(item, i)}</div>
+            ))
+          )}
+        </Box>
+      )}
+      {isDesktop && (
+        <Box
+          className={cn("md:min-h-0", tableWrapperClassName)}
+          sx={{ display: "block", minHeight: { md: 0 } }}
+        >
+          {renderTable()}
+        </Box>
+      )}
+    </Box>
   );
 }

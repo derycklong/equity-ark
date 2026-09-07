@@ -1,6 +1,9 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
+  // MUI CssBaseline owns the global reset. Keep Tailwind utilities available
+  // during the incremental page migration without competing resets.
+  corePlugins: { preflight: false },
   theme: {
     extend: {
       colors: {
@@ -22,6 +25,7 @@ module.exports = {
         bad: "rgb(var(--bad-rgb) / <alpha-value>)",
         warn: "rgb(var(--warn-rgb) / <alpha-value>)",
         accent: "rgb(var(--accent-rgb) / <alpha-value>)",
+        brand: "rgb(var(--accent-soft-rgb) / <alpha-value>)",
         info: "rgb(var(--info-rgb) / <alpha-value>)",
       },
     },
