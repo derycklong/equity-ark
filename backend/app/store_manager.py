@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Optional
 
 from .db import Database
+from .services.market_data import MarketDataService
 from .store import PortfolioStore
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,10 @@ class StoreManager:
         self.data_dir = Path(data_dir)
         self.db = Database(db_path)
         self.db.init()
+        # Market data is shared across users. A Yahoo symbol has the same
+        # quote and profile name regardless of which portfolio contains it.
+        # This lets the first user's refresh warm the cache for everyone else.
+        self.market_data = MarketDataService(ttl_seconds=600)
         self.max_cached_users = max_cached_users
         self._stores: "OrderedDict[str, PortfolioStore]" = OrderedDict()
         self._lock = threading.RLock()
@@ -40,7 +45,7 @@ class StoreManager:
                 evicted_id, evicted_store = self._stores.popitem(last=False)
                 logger.info("Evicting store for user %s", evicted_id)
 
-            store = PortfolioStore(db=self.db, user_id=user_id)
+            store = PortfolioStore(db=self.db, user_id=user_id, market_data=self.market_data)
             self._stores[user_id] = store
             return store
 

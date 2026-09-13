@@ -790,8 +790,9 @@ class PortfolioStore:
         Symbols whose yfinance lookup returned empty within the last 7 days
         are skipped via the `dividend_no_div_cache` table — this avoids
         re-hitting yfinance for delisted SPACs and non-dividend tickers.
-        Pass force=True to bypass the negative cache and re-verify symbols
-        marked as "no dividends" (used by the manual Refresh button).
+        The negative cache is respected even when force=True so delisted and
+        non-dividend symbols are not repeatedly sent to yfinance. Symbols not
+        in the cache are still re-verified by a forced refresh.
         """
         from .services.csv_parser import resolve_symbol
         with self._lock:
@@ -835,12 +836,11 @@ class PortfolioStore:
                 }
 
             # Skip symbols in the negative cache (confirmed no dividends).
-            # force=True bypasses this — re-verifies "no dividend" symbols.
-            # We use a short 1-day TTL so newly-declared dividends are picked
-            # up within 24 hours via the manual Refresh button, even if the
-            # daily scheduler hasn't run yet.
+            # Keep this skip active for forced refreshes too: delisted stocks
+            # should not be polled on every manual refresh. The short 1-day
+            # TTL still lets newly-declared dividends be discovered quickly.
             NO_DIV_TTL = 1 * 86400
-            no_div_yf = set() if force else self.db.get_no_div_symbols(NO_DIV_TTL)
+            no_div_yf = self.db.get_no_div_symbols(NO_DIV_TTL)
             skipped = 0
             for sym in list(target_syms.keys()):
                 if target_syms[sym]["yahoo_symbol"] in no_div_yf:
@@ -905,7 +905,7 @@ class PortfolioStore:
             }
 
     def refresh_prices(self, ttl: int = 600, force: bool = False) -> dict:
-        """Fetch live quotes for all open holdings in parallel.
+        """Fetch live quotes for all open holdings in one yfinance batch.
 
         Also backfills prices for sold symbols that have transactions, so that
         the company name is available even after the symbol is no longer held.
@@ -914,26 +914,19 @@ class PortfolioStore:
         cached prices for delisted / hard-to-find symbols.
 
         Args:
-            ttl: in-memory TTL for MarketDataService (seconds).
-        force: when True, bypass both the SQLite price_cache (24h TTL)
-            and the MarketDataService in-memory TTL — always hit
-            yfinance. Both the daily 6am scheduler and manual "Refresh"
-            pass force=True so the user always sees the latest prices
-            after the scheduled or manual run completes.
+            ttl: shared in-memory TTL for MarketDataService (seconds).
+        force: when True, bypass successful SQLite price_cache entries. A
+            recent quote in the shared in-memory cache is still reused across
+            users so the same Yahoo symbol is not downloaded repeatedly.
         """
         CACHE_MAX_AGE = 86400  # 24h — use cached price instead of hitting yfinance
         ERROR_CACHE_AGE = 604800  # 7d — delisted stocks are permanent, don't re-fetch often
 
         with self._lock:
-            if force:
-                # Drop the in-memory MarketDataService cache so the next
-                # get_quotes actually round-trips to yfinance.
-                try:
-                    self.market_data._cache.clear()
-                except Exception:
-                    pass
-
-            db_cache = {} if force else self.db.load_all_price_caches()
+            # Keep persisted error entries even during a forced refresh. This
+            # prevents delisted/broken symbols from being retried every time
+            # the user presses Refresh market data.
+            db_cache = self.db.load_all_price_caches()
             now = time.time()
 
             seen: Dict[str, dict] = {}
@@ -965,14 +958,16 @@ class PortfolioStore:
                 }
 
             # Use DB cache for symbols with fresh enough prices — skip yfinance.
-            # (Skipped entirely when force=True.)
+            # (Skipped for successful prices when force=True.)
             requests = []
             for sym, req in seen.items():
                 cached = db_cache.get(sym.upper())
                 if cached is not None:
                     cached_age = now - (cached.get("fetched_at") or 0)
                     max_age = ERROR_CACHE_AGE if cached.get("error") else CACHE_MAX_AGE
-                    if cached_age < max_age:
+                    # Successful prices are refreshed when force=True, but
+                    # known errors remain suppressed for the full error TTL.
+                    if cached_age < max_age and (not force or bool(cached.get("error"))):
                         self._prices[sym] = cached
                         continue
                 requests.append(req)
@@ -981,10 +976,19 @@ class PortfolioStore:
                 return {"updated": 0}
 
             self.market_data.ttl = ttl
-            quotes = self.market_data.get_quotes(requests, use_cache=not force)
+            # The MarketDataService is shared across all user stores. Force
+            # bypasses the persisted SQLite TTL, while the shared in-memory
+            # TTL prevents the same Yahoo symbol from being downloaded once
+            # per user during an all-user refresh.
+            quotes = self.market_data.get_quotes(requests, use_cache=True)
             updated = 0
             for sym, q in quotes.items():
                 qd = q.to_dict()
+                cached = db_cache.get(sym.upper())
+                # Batched yfinance downloads provide prices, not profile
+                # names. Preserve an existing cached name when refreshing.
+                if not qd.get("name") and cached and cached.get("name"):
+                    qd["name"] = cached["name"]
                 price_ok = qd.get("price") is not None and not qd.get("error")
                 self.db.save_price_cache(sym, qd)
                 if price_ok:
@@ -992,7 +996,6 @@ class PortfolioStore:
                     updated += 1
                 else:
                     # Fall back to persisted cache for delisted / failing symbols
-                    cached = db_cache.get(sym.upper())
                     if cached is not None and cached.get("price") is not None:
                         self._prices[sym] = cached
                     else:
@@ -1106,12 +1109,9 @@ class PortfolioStore:
         manual "Refresh" button. Returns counts of what was updated.
 
         Args:
-            force: bypass all caches (SQLite price_cache TTL,
-                MarketDataService in-memory TTL, dividend negative cache)
-                so the next "Refresh" click always returns the latest data
-                from yfinance. Both the daily 6am scheduler and manual
-                "Refresh" pass force=True so the cache is always fresh
-                when the user loads the dashboard.
+            force: bypass successful price caches and the in-memory TTL.
+                Recent error entries and the dividend negative cache remain
+                suppressed so delisted symbols are not repeatedly polled.
         """
         import json
         with self._lock:
@@ -1256,14 +1256,19 @@ class PortfolioStore:
             ("nasdaq", "^IXIC", "NASDAQ"),
             ("dow", "^DJI", "Dow Jones"),
         ]
+        requests = [
+            {
+                "symbol": yahoo_symbol,
+                "yahoo_symbol": yahoo_symbol,
+                "market": "us",
+                "currency": "USD",
+            }
+            for _, yahoo_symbol, _ in indices
+        ]
+        quotes = self.market_data.get_quotes(requests)
         for key, yahoo_symbol, name in indices:
             try:
-                q = self.market_data.get_quote(
-                    symbol=yahoo_symbol,
-                    yahoo_symbol=yahoo_symbol,
-                    market="us",
-                    currency="USD",
-                )
+                q = quotes[yahoo_symbol]
                 benchmarks[key] = {
                     "name": name,
                     "price": q.price,
@@ -1278,6 +1283,11 @@ class PortfolioStore:
     def get_holdings(self) -> List[dict]:
         with self._lock:
             out = []
+            seven_day_changes = self.market_data.get_7d_changes([
+                h.get("yahoo_symbol") or h["symbol"]
+                for h in self.holdings
+                if h.get("market") not in ("sg_bond", "cash", "other")
+            ])
             for h in self.holdings:
                 hh = dict(h)
                 price = self._prices.get(h["symbol"], {})
@@ -1292,7 +1302,7 @@ class PortfolioStore:
                 if h.get("market") in ("sg_bond", "cash", "other"):
                     hh["change_pct_7d"] = None
                 else:
-                    hh["change_pct_7d"] = self.market_data.get_7d_change(yf_sym)
+                    hh["change_pct_7d"] = seven_day_changes.get(yf_sym)
                 # Market value: use live price if available, otherwise cost basis
                 # (correct for savings bonds and cash which are held at par).
                 cur_px = hh.get("current_price")

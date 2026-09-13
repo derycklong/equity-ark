@@ -184,8 +184,13 @@ class Database:
     def _conn(self) -> sqlite3.Connection:
         conn = getattr(self._local, "conn", None)
         if conn is None:
-            conn = sqlite3.connect(str(self.path), check_same_thread=False)
+            # Refresh jobs can run in background threads while auth requests
+            # write to the same shared database. Give SQLite time to wait for
+            # the active writer instead of failing immediately with "database
+            # is locked".
+            conn = sqlite3.connect(str(self.path), timeout=30.0, check_same_thread=False)
             conn.execute("PRAGMA foreign_keys = ON")
+            conn.execute("PRAGMA busy_timeout = 30000")
             setattr(self._local, "conn", conn)
         return conn
 
@@ -202,6 +207,7 @@ class Database:
             if self._initialized:
                 return
             conn = self._conn()
+            conn.execute("PRAGMA journal_mode = WAL")
             conn.executescript(SCHEMA)
             conn.execute(
                 "INSERT OR IGNORE INTO schema_version (version) VALUES (?)",
@@ -354,6 +360,19 @@ class Database:
                         "market": r[6] or "", "name": r[7] or "", "error": r[8] or "",
                         "as_of": r[9], "fetched_at": r[10]}
                 for r in rows}
+
+    def clear_all_caches(self) -> dict:
+        """Clear all derived caches without touching user or portfolio data."""
+        conn = self._conn()
+        prices = conn.execute("DELETE FROM price_cache").rowcount
+        no_dividends = conn.execute("DELETE FROM dividend_no_div_cache").rowcount
+        dashboards = conn.execute("DELETE FROM dashboard_cache").rowcount
+        conn.commit()
+        return {
+            "price_cache": prices,
+            "no_dividend_cache": no_dividends,
+            "dashboard_cache": dashboards,
+        }
 
     # ----- "no dividends" negative cache -----
     # Symbols whose yfinance lookup returned empty are recorded here so we

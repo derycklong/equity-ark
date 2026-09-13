@@ -228,7 +228,7 @@ function AuthedLayout() {
   const isMobile = useMediaQuery(muiTheme.breakpoints.down("md"));
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
-  const pageLabel = loc.pathname === "/" ? "Overview" : navItems.find((item) => loc.pathname.startsWith(item.to) && item.to !== "/")?.label || (loc.pathname.startsWith("/admin") ? "Admin" : "Portfolio");
+  const pageLabel = loc.pathname === "/" ? "Overview" : loc.pathname.startsWith("/admin/refresh") ? "Refresh data" : navItems.find((item) => loc.pathname.startsWith(item.to) && item.to !== "/")?.label || (loc.pathname.startsWith("/admin") ? "Admin" : "Portfolio");
 
   useEffect(() => {
     setDrawerOpen(false);
@@ -321,6 +321,7 @@ export default function App() {
           <Route path="/dividends" element={<Dividends />} />
           <Route path="/advice" element={<Advice />} />
           <Route path="/admin" element={<Admin />} />
+          <Route path="/admin/refresh" element={<Admin />} />
           <Route path="*" element={<Dashboard />} />
         </Route>
       </Routes>

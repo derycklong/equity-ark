@@ -452,11 +452,131 @@ def auth_logout(request: Request, response: Response, user: dict = Depends(get_c
 
 # ----------------------------- admin ------------------------------------------
 
+_admin_refresh_lock = threading.RLock()
+_admin_refresh_execution_lock = threading.Lock()
+_admin_refresh_state: dict[str, dict] = {}
+
+
+def _admin_refresh_user(app_instance: FastAPI, user_id: str) -> None:
+    """Refresh one user's dashboard and record the result for admin polling."""
+    with _admin_refresh_lock:
+        state = _admin_refresh_state.setdefault(user_id, {})
+        state.update({
+            "status": "running",
+            "started_at": _time.time(),
+            "completed_at": None,
+            "error": None,
+        })
+    try:
+        # SQLite permits only one writer at a time. Serialize full refreshes
+        # across users so the admin action cannot starve login/session writes.
+        with _admin_refresh_execution_lock:
+            store = app_instance.state.store_manager.get_store(user_id)
+            result = store.rebuild_dashboard_cache(force=True)
+            try:
+                store.get_networth_history()
+            except Exception as e:
+                logger.warning("Admin networth pre-warm failed for user %s: %s", user_id, e)
+        with _admin_refresh_lock:
+            _admin_refresh_state[user_id].update({
+                "status": "success",
+                "completed_at": _time.time(),
+                "result": {
+                    "prices_updated": result.get("prices_updated", 0),
+                    "dividends_refreshed": result.get("dividends_refreshed", 0),
+                    "dividend_events": result.get("dividend_events", 0),
+                },
+            })
+    except Exception as e:
+        logger.warning("Admin refresh failed for user %s: %s", user_id, e, exc_info=True)
+        with _admin_refresh_lock:
+            _admin_refresh_state[user_id].update({
+                "status": "error",
+                "completed_at": _time.time(),
+                "error": str(e),
+            })
+
+
+def _start_admin_refresh(app_instance: FastAPI, user_id: str) -> bool:
+    with _admin_refresh_lock:
+        if _admin_refresh_state.get(user_id, {}).get("status") == "running":
+            return False
+        _admin_refresh_state[user_id] = {
+            **_admin_refresh_state.get(user_id, {}),
+            "status": "queued",
+            "queued_at": _time.time(),
+        }
+    thread = threading.Thread(target=_admin_refresh_user, args=(app_instance, user_id), daemon=True)
+    thread.start()
+    return True
+
+
+def _admin_refresh_rows(request: Request) -> list[dict]:
+    sm = request.app.state.store_manager
+    rows = []
+    for user in sm.db.list_all_users():
+        cached = sm.db.load_dashboard_cache(user["id"], "dashboard")
+        cached_data = cached.get("data", {}) if cached else {}
+        with _admin_refresh_lock:
+            refresh = dict(_admin_refresh_state.get(user["id"], {}))
+        rows.append({
+            **user,
+            "last_refreshed_at": cached_data.get("last_refreshed_at") if cached_data else (cached.get("updated_at") if cached else None),
+            "refresh_status": refresh.get("status", "idle"),
+            "refresh_started_at": refresh.get("started_at"),
+            "refresh_completed_at": refresh.get("completed_at"),
+            "refresh_error": refresh.get("error"),
+            "refresh_result": refresh.get("result"),
+        })
+    return rows
+
 @app.get("/api/admin/users")
 def admin_list_users(request: Request, admin: dict = Depends(require_admin)) -> dict:
     """Return every known user with last-login timestamp. Admin-only."""
     users = request.app.state.store_manager.db.list_all_users()
     return {"users": users, "admin_emails": get_admin_emails()}
+
+
+@app.get("/api/admin/refresh")
+def admin_refresh_status(request: Request, admin: dict = Depends(require_admin)) -> dict:
+    """Return refresh status for every user. Admin-only."""
+    return {"users": _admin_refresh_rows(request)}
+
+
+@app.post("/api/admin/refresh/all")
+def admin_refresh_all(request: Request, admin: dict = Depends(require_admin)) -> dict:
+    """Start refreshes for every known user. Admin-only."""
+    user_ids = request.app.state.store_manager.list_users()
+    started = sum(_start_admin_refresh(request.app, user_id) for user_id in user_ids)
+    return {"started": started, "total": len(user_ids)}
+
+
+@app.post("/api/admin/refresh/clear-and-refresh")
+def admin_clear_and_refresh_all(request: Request, admin: dict = Depends(require_admin)) -> dict:
+    """Clear derived market caches, then refresh every known user. Admin-only."""
+    sm = request.app.state.store_manager
+    user_ids = sm.list_users()
+    with _admin_refresh_execution_lock:
+        cleared = sm.db.clear_all_caches()
+        # Invalidate the in-memory copies held by already-cached stores too.
+        for store in list(sm._stores.values()):
+            with store._lock:
+                store._prices.clear()
+                store._networth_cache.clear()
+                store.market_data._cache.clear()
+                store.market_data._name_cache.clear()
+                store.market_data._div_cache.clear()
+        started = sum(_start_admin_refresh(request.app, user_id) for user_id in user_ids)
+    return {"cleared": cleared, "started": started, "total": len(user_ids)}
+
+
+@app.post("/api/admin/refresh/{user_id}")
+def admin_refresh_user(user_id: str, request: Request, admin: dict = Depends(require_admin)) -> dict:
+    """Start a refresh for one user. Admin-only."""
+    if user_id not in request.app.state.store_manager.list_users():
+        raise HTTPException(status_code=404, detail="User not found")
+    started = _start_admin_refresh(request.app, user_id)
+    return {"started": started, "status": "running" if not started else "queued", "user_id": user_id}
 
 
 # ----------------------------- helpers ---------------------------------------
@@ -528,11 +648,9 @@ def _daily_scheduler():
                     except Exception as e:
                         logger.warning("Daily dividend refresh failed for user %s: %s", uid, e)
                     # Prices + cache rebuild with force=True so the
-                    # scheduled 6am job actually pulls fresh yfinance data
-                    # instead of reusing yesterday's SQLite price_cache.
-                    # Manual "Refresh" also uses force=True; the per-request
-                    # SQLite cache still avoids hitting yfinance on every
-                    # page load.
+                    # scheduled 6am job bypasses yesterday's SQLite cache.
+                    # The shared in-memory market-data cache still reuses a
+                    # quote across users during this all-user refresh.
                     store.rebuild_dashboard_cache(force=True)
                     # Pre-warm the networth history (the in-memory 24h cache
                     # was just invalidated by rebuild_dashboard_cache above).

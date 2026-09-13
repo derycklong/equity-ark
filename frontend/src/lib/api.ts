@@ -8,6 +8,15 @@ export interface AdminUser {
   last_used_at: number | null;
 }
 
+export interface AdminRefreshUser extends AdminUser {
+  last_refreshed_at: number | null;
+  refresh_status: "idle" | "queued" | "running" | "success" | "error";
+  refresh_started_at?: number | null;
+  refresh_completed_at?: number | null;
+  refresh_error?: string | null;
+  refresh_result?: { prices_updated: number; dividends_refreshed: number; dividend_events: number } | null;
+}
+
 const base = "";
 
 async function request<T = any>(path: string, init: RequestInit = {}): Promise<T> {
@@ -27,6 +36,10 @@ export const api = {
   health: () => request<{ status: string; users: number; cached_stores: number; llm_enabled: boolean }>("/api/health"),
   authMe: () => request<{ user: { id: string; email: string; name: string; picture: string; is_admin?: boolean } }>("/api/auth/me"),
   adminUsers: () => request<{ users: AdminUser[]; admin_emails: string[] }>("/api/admin/users"),
+  adminRefreshStatus: () => request<{ users: AdminRefreshUser[] }>("/api/admin/refresh"),
+  adminRefreshUser: (userId: string) => request<{ started: boolean; status: string; user_id: string }>(`/api/admin/refresh/${encodeURIComponent(userId)}`, { method: "POST" }),
+  adminRefreshAll: () => request<{ started: number; total: number }>("/api/admin/refresh/all", { method: "POST" }),
+  adminClearAndRefreshAll: () => request<{ cleared: { price_cache: number; no_dividend_cache: number; dashboard_cache: number }; started: number; total: number }>("/api/admin/refresh/clear-and-refresh", { method: "POST" }),
   authGoogleLogin: () => { window.location.href = "/api/auth/google/login"; },
   authLogout: () => request<{ status: string }>("/api/auth/logout", { method: "POST" }),
   summary: () => request<any>("/api/portfolio/summary"),
