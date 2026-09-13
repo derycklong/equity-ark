@@ -29,7 +29,8 @@ CREATE TABLE IF NOT EXISTS users (
     name TEXT,
     picture TEXT,
     created_at REAL NOT NULL,
-    last_login_at REAL
+    last_login_at REAL,
+    last_used_at REAL
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -211,6 +212,8 @@ class Database:
             self._add_column_if_missing(
                 "dividend_events", "withholding_rate", "REAL NOT NULL DEFAULT 0.0"
             )
+            self._add_column_if_missing("users", "last_used_at", "REAL")
+            conn.execute("UPDATE users SET last_used_at = last_login_at WHERE last_used_at IS NULL")
             conn.commit()
             self._initialized = True
             logger.info("Database initialized at %s", self.path)
@@ -231,46 +234,53 @@ class Database:
         conn = self._conn()
         email = email.lower().strip()
         row = conn.execute(
-            "SELECT id, email, name, picture, created_at, last_login_at FROM users WHERE email = ?",
+            "SELECT id, email, name, picture, created_at, last_login_at, last_used_at FROM users WHERE email = ?",
             (email,),
         ).fetchone()
         now = time.time()
         if row is None:
             user_id = str(uuid.uuid4())
             conn.execute(
-                "INSERT INTO users (id, email, name, picture, created_at, last_login_at) VALUES (?, ?, ?, ?, ?, ?)",
-                (user_id, email, name, picture, now, now),
+                "INSERT INTO users (id, email, name, picture, created_at, last_login_at, last_used_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (user_id, email, name, picture, now, now, now),
             )
             conn.commit()
-            return {"id": user_id, "email": email, "name": name, "picture": picture, "created_at": now, "last_login_at": now}
-        user_id, _email, _name, _pic, created_at, _last_login = row
+            return {"id": user_id, "email": email, "name": name, "picture": picture, "created_at": now, "last_login_at": now, "last_used_at": now}
+        user_id, _email, _name, _pic, created_at, _last_login, _last_used = row
         conn.execute(
-            "UPDATE users SET name = ?, picture = ?, last_login_at = ? WHERE id = ?",
-            (name or _name, picture or _pic, now, user_id),
+            "UPDATE users SET name = ?, picture = ?, last_login_at = ?, last_used_at = ? WHERE id = ?",
+            (name or _name, picture or _pic, now, now, user_id),
         )
         conn.commit()
-        return {"id": user_id, "email": email, "name": name or _name or "", "picture": picture or _pic or "", "created_at": created_at, "last_login_at": now}
+        return {"id": user_id, "email": email, "name": name or _name or "", "picture": picture or _pic or "", "created_at": created_at, "last_login_at": now, "last_used_at": now}
 
     def get_user(self, user_id: str) -> Optional[dict]:
         row = self._conn().execute(
-            "SELECT id, email, name, picture, created_at, last_login_at FROM users WHERE id = ?", (user_id,),
+            "SELECT id, email, name, picture, created_at, last_login_at, last_used_at FROM users WHERE id = ?", (user_id,),
         ).fetchone()
         if not row:
             return None
-        return {"id": row[0], "email": row[1], "name": row[2] or "", "picture": row[3] or "", "created_at": row[4], "last_login_at": row[5]}
+        return {"id": row[0], "email": row[1], "name": row[2] or "", "picture": row[3] or "", "created_at": row[4], "last_login_at": row[5], "last_used_at": row[6]}
 
     def get_user_by_email(self, email: str) -> Optional[dict]:
         row = self._conn().execute(
-            "SELECT id, email, name, picture, created_at, last_login_at FROM users WHERE email = ?", (email.lower().strip(),),
+            "SELECT id, email, name, picture, created_at, last_login_at, last_used_at FROM users WHERE email = ?", (email.lower().strip(),),
         ).fetchone()
         if not row:
             return None
-        return {"id": row[0], "email": row[1], "name": row[2] or "", "picture": row[3] or "", "created_at": row[4], "last_login_at": row[5]}
+        return {"id": row[0], "email": row[1], "name": row[2] or "", "picture": row[3] or "", "created_at": row[4], "last_login_at": row[5], "last_used_at": row[6]}
+
+    def touch_user(self, user_id: str) -> float:
+        """Record the most recent authenticated activity for a user."""
+        now = time.time()
+        self._conn().execute("UPDATE users SET last_used_at = ? WHERE id = ?", (now, user_id))
+        self._conn().commit()
+        return now
 
     def list_all_users(self) -> list[dict]:
         """Return every user, ordered by most-recent login first."""
         rows = self._conn().execute(
-            "SELECT id, email, name, picture, created_at, last_login_at FROM users "
+            "SELECT id, email, name, picture, created_at, last_login_at, last_used_at FROM users "
             "ORDER BY COALESCE(last_login_at, 0) DESC, created_at DESC",
         ).fetchall()
         return [
@@ -281,6 +291,7 @@ class Database:
                 "picture": r[3] or "",
                 "created_at": r[4],
                 "last_login_at": r[5],
+                "last_used_at": r[6],
             }
             for r in rows
         ]

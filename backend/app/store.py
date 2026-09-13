@@ -1314,6 +1314,13 @@ class PortfolioStore:
                     hh["unrealized_pnl_pct"] = 0.0
                     hh["day_change"] = 0.0
                     hh["day_change_pct"] = 0.0
+                # Holdings rows keep market_value in their native currency for
+                # per-currency tables. Also expose a base-currency value so
+                # clients do not accidentally add USD/HKD/SGD amounts together.
+                base_currency = "SGD"
+                fx_rate = self.fx.get(hh["currency"], base_currency)
+                hh["market_value_base"] = round((hh.get("market_value") or 0.0) * fx_rate, 2)
+                hh["base_currency"] = base_currency
                 hh["dividends_received"] = round(self.dividends_by_symbol.get(h["symbol"], 0.0), 2)
                 out.append(hh)
             return out

@@ -7,7 +7,6 @@ import { useRoundtrips } from "../hooks/usePortfolio";
 import { LoadingScreen } from "../components/LoadingScreen";
 import MobileTable from "../components/MobileTable";
 import PageHeader from "../components/ui/PageHeader";
-import MetricCard from "../components/ui/MetricCard";
 import { marketLabel } from "../components/dashboard/shared";
 
 type Roundtrip = {
@@ -291,13 +290,6 @@ const [sortDesc, setSortDesc] = useState(true);
           </Stack>
         }
       />
-
-      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2, 1fr)", md: "repeat(4, 1fr)" }, gap: 1.5 }}>
-        <MetricCard label="Closed positions" value={stats.total} supporting={`${filtered.length} shown`} tone="primary" icon={<CompareArrowsOutlined fontSize="small" />} />
-        <MetricCard label="Winners" value={stats.wins} supporting={stats.total ? `${fmtPct(stats.wins / stats.total, 1)} win rate` : "—"} tone="success" />
-        <MetricCard label="Losers" value={stats.losses} supporting="closed trades below cost" tone="error" />
-        <MetricCard label="Total P&L" value={fmtNum(stats.totalPnl, 2)} supporting="native roundtrip sum" tone={stats.totalPnl >= 0 ? "success" : "error"} />
-      </Box>
 
       <Card variant="outlined" sx={{ overflow: "hidden", minHeight: { md: 0 }, flex: { md: 1 }, display: { md: "flex" }, flexDirection: { md: "column" } }}>
         {/* Mobile: expand/collapse all controls */}

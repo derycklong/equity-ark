@@ -1,10 +1,9 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { Accordion, AccordionDetails, AccordionSummary, Box, Button, Card, CardContent, Chip, LinearProgress, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography } from "@mui/material";
+import { Accordion, AccordionDetails, AccordionSummary, Box, Card, CardContent, Chip, LinearProgress, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Tooltip, Typography } from "@mui/material";
 import ExpandMoreRounded from "@mui/icons-material/ExpandMoreRounded";
-import { api } from "../lib/api";
 import { fmtDate, ccySymbol, fmtMoneyFull, fmtPct, fmtNum } from "../lib/utils";
-import { Coins, Building2, ArrowUpRight, ArrowDownRight, RefreshCw, ChevronDown, ChevronUp, BarChart3, Calendar, Wallet, TrendingUp, ListChecks } from "lucide-react";
-import { useDividends, useHoldings, useInvalidateAll } from "../hooks/usePortfolio";
+import { Coins, Building2, ArrowUpRight, ArrowDownRight, ChevronDown, ChevronUp, BarChart3, Calendar, Wallet, TrendingUp, ListChecks } from "lucide-react";
+import { useDividends, useHoldings } from "../hooks/usePortfolio";
 import { LoadingScreen } from "../components/LoadingScreen";
 import MobileTable from "../components/MobileTable";
 import PageHeader from "../components/ui/PageHeader";
@@ -27,12 +26,10 @@ function colorForCcy(ccy: string) {
 type CardId = "kpi" | "monthly" | "yearly" | "payers" | "currency";
 
 export default function Dividends() {
-  const invalidateAll = useInvalidateAll();
   const { data: divData, isLoading } = useDividends();
   const { data: holdingsData } = useHoldings();
   const [ccyFilter, setCcyFilter] = useState<string>("ALL");
-  const [refreshing, setRefreshing] = useState(false);
-  const [refreshMsg, setRefreshMsg] = useState<string | null>(null);
+  const [transactionSearch, setTransactionSearch] = useState("");
   // Default the snapshot card open.
   const [openCard, setOpenCard] = useState<CardId | "">("kpi");
 
@@ -40,22 +37,6 @@ export default function Dividends() {
     setOpenCard((curr) => (curr === id ? "" : id) as CardId);
   };
 
-  const handleRefresh = async () => {
-    setRefreshing(true);
-    setRefreshMsg(null);
-    try {
-      const r = await api.cacheRefresh();
-      setRefreshMsg(
-        `Refreshed prices (${r.prices_updated}) + dividends (${r.dividends_refreshed} symbols · ${r.dividend_events} events)`,
-      );
-      invalidateAll();
-    } catch (e: any) {
-      setRefreshMsg(`Refresh failed: ${e?.message || e}`);
-    } finally {
-      setRefreshing(false);
-      setTimeout(() => setRefreshMsg(null), 4000);
-    }
-  };
 
   const data = divData;
   const events = data?.events || [];
@@ -80,7 +61,6 @@ export default function Dividends() {
   // Last full year's dividends per symbol (in native currency, for yield calc)
   const lastFullYear = (() => {
     const now = new Date();
-    if (now.getMonth() === 0) return String(now.getFullYear() - 2);
     return String(now.getFullYear() - 1);
   })();
   const lastYearDivsBySym = useMemo(() => {
@@ -113,6 +93,7 @@ export default function Dividends() {
   }, [events]);
 
   const yearTotalsSgd = summary.by_year_base || {};
+  const avgMonthlyLastFullYear = Number(yearTotalsSgd[lastFullYear] || 0) / 12;
   const maxYearSgd = Math.max(...Object.values(yearTotalsSgd).map((v) => Number(v)), 1);
 
   // Per-currency per-year for the stacked bar
@@ -246,10 +227,14 @@ export default function Dividends() {
     return m;
   }, [events, yearCcyRates]);
 
-  const filteredEvents = useMemo(
-    () => (ccyFilter === "ALL" ? events : events.filter((e: any) => e.currency === ccyFilter)),
-    [events, ccyFilter],
-  );
+  const filteredEvents = useMemo(() => {
+    const query = transactionSearch.trim().toLowerCase();
+    return events.filter((e: any) => {
+      if (ccyFilter !== "ALL" && e.currency !== ccyFilter) return false;
+      if (query && !e.symbol.toLowerCase().includes(query) && !(e.name || "").toLowerCase().includes(query)) return false;
+      return true;
+    });
+  }, [events, ccyFilter, transactionSearch]);
 
   if (isLoading) return <LoadingScreen />;
   if (!data) return <div>No data</div>;
@@ -260,14 +245,13 @@ export default function Dividends() {
         title="Dividends"
         icon={<Coins size={20} />}
         subtitle={`${summary.events_count || 0} events · ${bySymbol.length} payers · ${ccys.length} currencies`}
-        actions={<Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ alignItems: { xs: "stretch", sm: "center" }, width: { xs: "100%", sm: "auto" } }}>{refreshMsg && <Typography variant="caption" color="text.secondary">{refreshMsg}</Typography>}<Button size="small" variant="outlined" onClick={handleRefresh} disabled={refreshing} startIcon={<RefreshCw size={14} className={refreshing ? "animate-spin" : ""} />} sx={{ width: { xs: "100%", sm: "auto" } }}>{refreshing ? "Refreshing…" : "Refresh data"}</Button></Stack>}
       />
 
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2, 1fr)", md: "repeat(4, 1fr)" }, gap: 1.5 }}>
         <MetricCard label="Lifetime" value={fmtMoneyFull(totalSgd, BASE_CCY)} supporting="net dividends received" tone="warning" icon={<Coins size={16} />} />
         <MetricCard label={`YTD ${currentYear}`} value={fmtMoneyFull(ytdSgd, BASE_CCY)} supporting={lastYtdSgd > 0 ? `${fmtPct(yoyChange, 1)} vs ${lastYear}` : "current year"} tone={yoyChange >= 0 ? "success" : "error"} />
         <MetricCard label="Top payer" value={topPayer ? (topPayer.name || topPayer.symbol) : "—"} supporting={topPayer ? `${fmtPct(topPayerPct, 2)} yield · ${lastFullYear}` : "No payer data"} tone="primary" />
-        <MetricCard label="Avg / month" value={fmtMoneyFull(monthlySorted.length ? monthlySorted.reduce((sum, [, value]) => sum + value, 0) / monthlySorted.length : 0, BASE_CCY)} supporting="across available months" />
+        <MetricCard label="Avg / month" value={fmtMoneyFull(avgMonthlyLastFullYear, BASE_CCY)} supporting={`${lastFullYear} total ÷ 12 months`} />
       </Box>
 
       {/* === Mobile: transactions only (full width) === */}
@@ -284,7 +268,15 @@ export default function Dividends() {
               <Box sx={{ color: "warning.main", display: "flex" }}><ListChecks size={13} /></Box>
               All dividend transactions
             </Typography>
-            <Stack direction="row" spacing={0.5} sx={{ overflowX: "auto", whiteSpace: "nowrap", minWidth: 0, ml: { xs: "auto", lg: 0 } }}>
+            <TextField
+              size="small"
+              value={transactionSearch}
+              onChange={(event) => setTransactionSearch(event.target.value)}
+              placeholder="Search symbol or name"
+              aria-label="Search dividend transactions"
+              sx={{ width: { xs: 145, sm: 190 }, flexShrink: 0, "& .MuiInputBase-root": { height: 28, fontSize: "0.72rem" }, "& input": { py: 0.5 } }}
+            />
+            <Stack direction="row" spacing={0.5} sx={{ overflowX: "auto", whiteSpace: "nowrap", minWidth: 0, ml: { xs: 0, lg: "auto" } }}>
               <Chip
                 onClick={() => setCcyFilter("ALL")}
                 label={`All (${events.length})`}
@@ -385,7 +377,7 @@ export default function Dividends() {
                 tone={lastYtdSgd > 0 ? (yoyChange >= 0 ? "success.main" : "error.main") : undefined}
               />
               <SideMetric label="Top payer" value={topPayer ? (topPayer.name || topPayer.symbol) : "—"} detail={topPayer ? `${fmtPct(topPayerPct, 2)} yield · ${lastFullYear}` : undefined} tone="warning.main" />
-              <SideMetric label="Avg / month" value={fmtMoneyFull(monthlySorted.length > 0 ? monthlySorted.reduce((s, [, v]) => s + v, 0) / monthlySorted.length : 0, BASE_CCY)} />
+              <SideMetric label="Avg / month" value={fmtMoneyFull(avgMonthlyLastFullYear, BASE_CCY)} detail={`${lastFullYear} total ÷ 12 months`} />
             </Box>
           </AccordionCard>
 
@@ -399,17 +391,19 @@ export default function Dividends() {
               onToggle={() => toggleCard("monthly")}
               badge={`last ${last12Months.length} mo`}
             >
-              <Box sx={{ display: "flex", alignItems: "stretch", gap: 0.5, height: 160 }}>
-                {last12Months.map(([k, v]) => {
+                    <Box sx={{ display: "flex", alignItems: "stretch", gap: 0.5, height: 160 }}>
+                      {last12Months.map(([k, v]) => {
                   const pct = (v / maxMonthSgd) * 100;
                   const [y, m] = k.split("-");
                   const monthLabel = new Date(Number(y), Number(m) - 1).toLocaleString("en-US", { month: "short" });
                   const isCurrentMonth = k === last12Months[last12Months.length - 1][0];
                   return (
-                    <Box key={k} title={`${monthLabel} ${y}: ${fmtMoneyFull(v, BASE_CCY)}`} sx={{ flex: 1, minWidth: 0, height: "100%", display: "flex", flexDirection: "column", justifyContent: "flex-end", alignItems: "stretch" }}>
-                      <Box sx={{ height: `${Math.max(pct, 1)}%`, minHeight: 2, bgcolor: isCurrentMonth ? "warning.main" : "warning.light", opacity: isCurrentMonth ? 1 : 0.45, borderRadius: "4px 4px 0 0", transition: "opacity 160ms" }} />
-                      <Typography variant="caption" color="text.secondary" align="center" sx={{ fontSize: "0.58rem", mt: 0.35, lineHeight: 1 }}>{monthLabel}</Typography>
-                    </Box>
+                          <Tooltip key={k} title={`${monthLabel} ${y}: ${fmtMoneyFull(v, BASE_CCY)}`} arrow placement="top" enterTouchDelay={0}>
+                            <Box sx={{ flex: 1, minWidth: 0, height: "100%", display: "flex", flexDirection: "column", justifyContent: "flex-end", alignItems: "stretch", cursor: "help" }}>
+                            <Box sx={{ height: `${Math.max(pct, 1)}%`, minHeight: 2, bgcolor: isCurrentMonth ? "warning.main" : "warning.light", opacity: isCurrentMonth ? 1 : 0.45, borderRadius: "4px 4px 0 0", transition: "opacity 160ms" }} />
+                            <Typography variant="caption" color="text.secondary" align="center" sx={{ fontSize: "0.58rem", mt: 0.35, lineHeight: 1 }}>{monthLabel}</Typography>
+                            </Box>
+                          </Tooltip>
                   );
                 })}
               </Box>

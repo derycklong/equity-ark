@@ -145,6 +145,24 @@ export default function NetWorthChart({ ccy }: NetWorthChartProps) {
            lineStyle: { width: 3, color: lineColor, cap: "round", join: "round" },
            itemStyle: { color: lineColor, borderColor: theme.palette.background.paper, borderWidth: 2 },
            emphasis: { focus: "series", scale: true, itemStyle: { borderWidth: 3 } },
+           label: {
+             show: widthBucket === "wide",
+             position: "top",
+             distance: 8,
+             color: textColor,
+             fontSize: 10,
+             fontWeight: 600,
+             backgroundColor: tooltipBg,
+             borderColor: gridColor,
+             borderWidth: 1,
+             borderRadius: 4,
+             padding: [3, 5],
+             formatter: (params: any) => {
+               const value = Number(params.value);
+               const sign = value < 0 ? "-" : "";
+               return `${sign}${ccySymbol(ccy)}${Math.round(Math.abs(value)).toLocaleString("en-US")}`;
+             },
+           },
           areaStyle: {
               color: new (echarts as any).graphic.LinearGradient(0, 0, 0, 1, [
                { offset: 0, color: alpha(theme.palette.primary.main, 0.3) },

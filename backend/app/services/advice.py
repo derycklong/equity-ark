@@ -351,7 +351,10 @@ Be concise. Use markdown pipe tables for any multi-row data. Refer to symbols by
         async with httpx.AsyncClient(timeout=240.0) as client:
             r = await client.post(
                 f"{base_url.rstrip('/')}/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}"},
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "x-opencode-session": "equity-ark",
+                },
                 json={
                     "model": model,
                     "messages": [
@@ -439,7 +442,10 @@ Be concise. Use markdown pipe tables for any multi-row data. Refer to symbols by
         async with client.stream(
             "POST",
             f"{base_url.rstrip('/')}/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}"},
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "x-opencode-session": "equity-ark",
+            },
             json={
                 "model": model,
                 "messages": [

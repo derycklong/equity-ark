@@ -30,6 +30,7 @@ import ArrowDownwardRounded from "@mui/icons-material/ArrowDownwardRounded";
 import ArrowUpwardRounded from "@mui/icons-material/ArrowUpwardRounded";
 import CloseRounded from "@mui/icons-material/CloseRounded";
 import ExpandMoreRounded from "@mui/icons-material/ExpandMoreRounded";
+import { alpha, useTheme } from "@mui/material/styles";
 import { fmtMoney, fmtMoneyCeil, fmtPct, fmtNum, fmtDate } from "../lib/utils";
 import { useHoldings } from "../hooks/usePortfolio";
 import { LoadingScreen } from "../components/LoadingScreen";
@@ -44,6 +45,7 @@ interface Holding extends HoldingBase {
   display_pnl_pct: number;
   display_total_return: number;
   total_return_pct: number;
+  weight_pct: number;
   unreal_pct: number;
   real_pct: number;
   div_pct: number;
@@ -61,6 +63,8 @@ interface HoldingBase {
   avg_cost: number;
   current_price?: number | null;
   market_value?: number | null;
+  market_value_base?: number | null;
+  base_currency?: string;
   unrealized_pnl?: number | null;
   unrealized_pnl_pct?: number | null;
   day_change_pct?: number | null;
@@ -72,7 +76,7 @@ interface HoldingBase {
   label?: string;
 }
 
-type SortKey = "symbol" | "market" | "qty" | "price" | "cost" | "mktval" | "day" | "unreal" | "real" | "divs" | "pnl";
+type SortKey = "symbol" | "qty" | "price" | "cost" | "mktval" | "weight" | "unreal" | "real" | "divs" | "pnl";
 
 export default function Holdings() {
   const [params] = useSearchParams();
@@ -93,30 +97,43 @@ export default function Holdings() {
     }
   }, [focusSymbol, holdings]);
 
-  const enriched = useMemo((): Holding[] => holdings.map((holding: HoldingBase) => {
-    const hasPrice = holding.current_price != null;
-    const marketValue = hasPrice ? (holding.market_value ?? holding.cost_basis) : holding.cost_basis;
-    const unrealized = hasPrice ? (holding.unrealized_pnl ?? 0) : 0;
-    const realized = holding.realized_pnl ?? 0;
-    const dividends = holding.dividends_received ?? 0;
-    const total = unrealized + realized + dividends;
-    const unrealPct = holding.cost_basis > 0 ? unrealized / holding.cost_basis : 0;
-    const realPct = holding.cost_basis > 0 ? realized / holding.cost_basis : 0;
-    const divPct = holding.cost_basis > 0 ? dividends / holding.cost_basis : 0;
-    const totalPct = holding.cost_basis > 0 ? total / holding.cost_basis : 0;
-    return {
+  const enriched = useMemo((): Holding[] => {
+    const rows = holdings.map((holding: HoldingBase) => {
+      const hasPrice = holding.current_price != null;
+      const marketValue = hasPrice ? (holding.market_value ?? holding.cost_basis) : holding.cost_basis;
+      const unrealized = hasPrice ? (holding.unrealized_pnl ?? 0) : 0;
+      const realized = holding.realized_pnl ?? 0;
+      const dividends = holding.dividends_received ?? 0;
+      const total = unrealized + realized + dividends;
+      const unrealPct = holding.cost_basis > 0 ? unrealized / holding.cost_basis : 0;
+      const realPct = holding.cost_basis > 0 ? realized / holding.cost_basis : 0;
+      const divPct = holding.cost_basis > 0 ? dividends / holding.cost_basis : 0;
+      const totalPct = holding.cost_basis > 0 ? total / holding.cost_basis : 0;
+      return {
+        ...holding,
+        display_mv: marketValue,
+        display_pnl: total,
+        display_pnl_pct: totalPct,
+        display_total_return: total,
+        total_return_pct: totalPct,
+        weight_pct: 0,
+        unreal_pct: unrealPct,
+        real_pct: realPct,
+        div_pct: divPct,
+        hasPrice,
+      };
+    });
+    const totalPortfolioValue = rows.reduce(
+      (sum, holding) => sum + (holding.market_value_base ?? (holding.currency === "SGD" ? holding.display_mv : 0)),
+      0,
+    );
+    return rows.map((holding) => ({
       ...holding,
-      display_mv: marketValue,
-      display_pnl: total,
-      display_pnl_pct: totalPct,
-      display_total_return: total,
-      total_return_pct: totalPct,
-      unreal_pct: unrealPct,
-      real_pct: realPct,
-      div_pct: divPct,
-      hasPrice,
-    };
-  }), [holdings]);
+      weight_pct: totalPortfolioValue > 0
+        ? (holding.market_value_base ?? (holding.currency === "SGD" ? holding.display_mv : 0)) / totalPortfolioValue
+        : 0,
+    }));
+  }, [holdings]);
 
   const filtered = useMemo(() => enriched.filter((holding) => {
     if (filter && !holding.symbol.toLowerCase().includes(filter.toLowerCase())) return false;
@@ -127,12 +144,11 @@ export default function Holdings() {
   const getSortVal = (holding: Holding, key: SortKey): number | string => {
     switch (key) {
       case "symbol": return holding.symbol;
-      case "market": return holding.market;
       case "qty": return holding.quantity;
       case "price": return holding.current_price ?? 0;
       case "cost": return holding.cost_basis;
       case "mktval": return holding.display_mv;
-      case "day": return holding.day_change ?? 0;
+      case "weight": return holding.weight_pct;
       case "unreal": return holding.unrealized_pnl ?? 0;
       case "real": return holding.realized_pnl ?? 0;
       case "divs": return holding.dividends_received ?? 0;
@@ -153,7 +169,7 @@ export default function Holdings() {
     if (sortKey === key) setSortDir((direction) => direction === "asc" ? "desc" : "asc");
     else {
       setSortKey(key);
-      setSortDir(key === "symbol" || key === "market" ? "asc" : "desc");
+      setSortDir(key === "symbol" ? "asc" : "desc");
     }
   };
 
@@ -167,7 +183,7 @@ export default function Holdings() {
       const sumReal = rows.reduce((sum, row) => sum + (row.realized_pnl ?? 0), 0);
       const sumDivs = rows.reduce((sum, row) => sum + (row.dividends_received ?? 0), 0);
       const sumTotal = sumUnreal + sumReal + sumDivs;
-      const sumDay = rows.reduce((sum, row) => sum + (row.day_change ?? 0), 0);
+      const sumWeightPct = rows.reduce((sum, row) => sum + row.weight_pct, 0);
       return {
         ccy,
         rows,
@@ -177,16 +193,16 @@ export default function Holdings() {
         sumReal,
         sumDivs,
         sumTotal,
+        sumWeightPct,
         sumUnrealPct: sumCost > 0 ? sumUnreal / sumCost : 0,
         sumTotalPct: sumCost > 0 ? sumTotal / sumCost : 0,
-        sumDay,
       };
     }).sort((a, b) => b.sumMv - a.sumMv);
   }, [filtered]);
 
   const markets = Array.from(new Set(holdings.map((holding: HoldingBase) => holding.market))).sort();
   const totals = filtered.reduce((acc, holding) => ({
-    marketValue: acc.marketValue + holding.display_mv,
+    marketValue: acc.marketValue + (holding.market_value_base ?? (holding.currency === "SGD" ? holding.display_mv : 0)),
     cost: acc.cost + holding.cost_basis,
     pnl: acc.pnl + holding.display_pnl,
   }), { marketValue: 0, cost: 0, pnl: 0 });
@@ -197,7 +213,7 @@ export default function Holdings() {
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
       <PageHeader
         title="Holdings"
-        subtitle={`${filtered.length} positions · select a position to inspect its FIFO lots`}
+        subtitle={`${filtered.length} open positions`}
         icon={<AccountBalanceWalletOutlined />}
         actions={
           <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap", justifyContent: { xs: "stretch", sm: "flex-end" } }}>
@@ -210,14 +226,37 @@ export default function Holdings() {
         }
       />
 
-      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2, 1fr)", md: "repeat(3, 1fr)" }, gap: 1.5 }}>
-        <MetricCard label="Market value" value={fmtMoney(totals.marketValue, "SGD")} supporting={`${filtered.length} visible positions`} tone="primary" icon={<AccountBalanceWalletOutlined fontSize="small" />} />
-        <MetricCard label="Cost basis" value={fmtMoney(totals.cost, "SGD")} supporting="native totals grouped below" tone="default" />
-        <MetricCard label="Total P&L" value={fmtMoney(totals.pnl, "SGD")} meta={totals.cost > 0 ? fmtPct(totals.pnl / totals.cost, 1) : undefined} supporting="unrealized + realized + dividends" tone={totals.pnl >= 0 ? "success" : "error"} icon={totals.pnl >= 0 ? <ArrowUpwardRounded fontSize="small" /> : <ArrowDownwardRounded fontSize="small" />} />
-      </Box>
+      {isMobile ? (
+        <Card variant="outlined">
+          <CardContent sx={{ p: 1.5, "&:last-child": { pb: 1.5 } }}>
+            <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em" }}>Portfolio summary</Typography>
+            <Box sx={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 1, fontVariantNumeric: "tabular-nums" }}>
+              <Box sx={{ minWidth: 0 }}>
+                <Typography variant="caption" color="text.secondary" sx={{ display: "block", fontWeight: 700 }}>Market value</Typography>
+                <Typography variant="body2" color="primary.main" sx={{ mt: 0.25, fontWeight: 700 }} noWrap>{fmtMoney(totals.marketValue, "SGD")}</Typography>
+              </Box>
+              <Box sx={{ minWidth: 0 }}>
+                <Typography variant="caption" color="text.secondary" sx={{ display: "block", fontWeight: 700 }}>Cost basis</Typography>
+                <Typography variant="body2" sx={{ mt: 0.25, fontWeight: 700 }} noWrap>{fmtMoney(totals.cost, "SGD")}</Typography>
+              </Box>
+              <Box sx={{ minWidth: 0 }}>
+                <Typography variant="caption" color="text.secondary" sx={{ display: "block", fontWeight: 700 }}>Total P&amp;L</Typography>
+                <Typography variant="body2" sx={{ mt: 0.25, color: totals.pnl >= 0 ? "success.main" : "error.main", fontWeight: 700 }} noWrap>{fmtMoney(totals.pnl, "SGD")}</Typography>
+                <Typography variant="caption" sx={{ color: totals.pnl >= 0 ? "success.main" : "error.main", fontWeight: 600 }} noWrap>{totals.cost > 0 ? fmtPct(totals.pnl / totals.cost, 1) : "—"}</Typography>
+              </Box>
+            </Box>
+          </CardContent>
+        </Card>
+      ) : (
+        <Box sx={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 1.5 }}>
+          <MetricCard label="Market value" value={fmtMoney(totals.marketValue, "SGD")} tone="primary" icon={<AccountBalanceWalletOutlined fontSize="small" />} />
+          <MetricCard label="Cost basis" value={fmtMoney(totals.cost, "SGD")} tone="default" />
+          <MetricCard label="Total P&L" value={fmtMoney(totals.pnl, "SGD")} meta={totals.cost > 0 ? fmtPct(totals.pnl / totals.cost, 1) : undefined} tone={totals.pnl >= 0 ? "success" : "error"} icon={totals.pnl >= 0 ? <ArrowUpwardRounded fontSize="small" /> : <ArrowDownwardRounded fontSize="small" />} />
+        </Box>
+      )}
 
       {grouped.length === 0 && <Card variant="outlined"><CardContent><Typography color="text.secondary">No holdings match the current filters.</Typography></CardContent></Card>}
-      {grouped.map(({ ccy, rows, sumMv, sumCost, sumUnreal, sumReal, sumDivs, sumTotal, sumUnrealPct, sumTotalPct, sumDay }) => (
+      {grouped.map(({ ccy, rows, sumMv, sumCost, sumUnreal, sumReal, sumDivs, sumTotal, sumWeightPct, sumUnrealPct, sumTotalPct }) => (
         <Card key={ccy} variant="outlined" sx={{ overflow: "hidden" }}>
           <Stack direction="row" sx={{ px: { xs: 1.5, sm: 2 }, py: 1.25, alignItems: "center", justifyContent: "space-between", bgcolor: "action.hover" }}>
             <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
@@ -233,20 +272,31 @@ export default function Holdings() {
             renderCard={(holding) => <HoldingCard holding={holding} ccy={ccy} selected={selected?.symbol === holding.symbol} onSelect={() => setSelected(holding)} />}
             renderTable={() => (
               <TableContainer sx={{ overflowX: "auto" }}>
-                <Table size="small" sx={{ minWidth: 1000 }}>
+                <Table size="small" sx={{ minWidth: 1210, tableLayout: "fixed", "& th, & td": { overflow: "hidden" } }}>
+                  <colgroup>
+                    <col style={{ width: 180 }} />
+                    <col style={{ width: 90 }} />
+                    <col style={{ width: 110 }} />
+                    <col style={{ width: 125 }} />
+                    <col style={{ width: 135 }} />
+                    <col style={{ width: 80 }} />
+                    <col style={{ width: 125 }} />
+                    <col style={{ width: 115 }} />
+                    <col style={{ width: 115 }} />
+                    <col style={{ width: 135 }} />
+                  </colgroup>
                   <TableHead>
                     <TableRow>
                       <SortCell label="Position" sortKey="symbol" current={sortKey} direction={sortDir} onSort={handleSort} />
-                      <SortCell label="Market" sortKey="market" current={sortKey} direction={sortDir} onSort={handleSort} sx={{ display: { xs: "none", sm: "table-cell" } }} />
-                      <SortCell label="Qty / avg" sortKey="qty" current={sortKey} direction={sortDir} align="right" />
-                      <SortCell label="Price" sortKey="price" current={sortKey} direction={sortDir} align="right" />
-                      <SortCell label="Cost basis" sortKey="cost" current={sortKey} direction={sortDir} align="right" sx={{ display: { xs: "none", sm: "table-cell" } }} />
-                      <SortCell label="Market value" sortKey="mktval" current={sortKey} direction={sortDir} align="right" />
-                      <SortCell label="Day" sortKey="day" current={sortKey} direction={sortDir} align="right" sx={{ display: { xs: "none", md: "table-cell" } }} />
-                      <SortCell label="Unrealized" sortKey="unreal" current={sortKey} direction={sortDir} align="right" sx={{ display: { xs: "none", md: "table-cell" } }} />
-                      <SortCell label="Realized" sortKey="real" current={sortKey} direction={sortDir} align="right" sx={{ display: { xs: "none", md: "table-cell" } }} />
-                      <SortCell label="Dividends" sortKey="divs" current={sortKey} direction={sortDir} align="right" sx={{ display: { xs: "none", md: "table-cell" } }} />
-                      <SortCell label="Total P&L" sortKey="pnl" current={sortKey} direction={sortDir} align="right" />
+                      <SortCell label="Qty / avg" sortKey="qty" current={sortKey} direction={sortDir} onSort={handleSort} align="right" />
+                      <SortCell label="Price" sortKey="price" current={sortKey} direction={sortDir} onSort={handleSort} align="right" />
+                      <SortCell label="Cost basis" sortKey="cost" current={sortKey} direction={sortDir} onSort={handleSort} align="right" sx={{ display: { xs: "none", sm: "table-cell" } }} />
+                      <SortCell label="Market value" sortKey="mktval" current={sortKey} direction={sortDir} onSort={handleSort} align="right" />
+                      <SortCell label="Weight" sortKey="weight" current={sortKey} direction={sortDir} onSort={handleSort} align="right" />
+                      <SortCell label="Unrealized" sortKey="unreal" current={sortKey} direction={sortDir} onSort={handleSort} align="right" sx={{ display: { xs: "none", md: "table-cell" } }} />
+                      <SortCell label="Realized" sortKey="real" current={sortKey} direction={sortDir} onSort={handleSort} align="right" sx={{ display: { xs: "none", md: "table-cell" } }} />
+                      <SortCell label="Dividends" sortKey="divs" current={sortKey} direction={sortDir} onSort={handleSort} align="right" sx={{ display: { xs: "none", md: "table-cell" } }} />
+                      <SortCell label="Total P&L" sortKey="pnl" current={sortKey} direction={sortDir} onSort={handleSort} align="right" />
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -255,14 +305,13 @@ export default function Holdings() {
                     ))}
                   </TableBody>
                   <TableFooter>
-                    <TableRow sx={{ bgcolor: "action.hover" }}>
+                    <TableRow sx={{ bgcolor: "action.hover", "& td": { fontWeight: 700 }, "& .MuiTypography-root": { fontWeight: 700 } }}>
                       <TableCell><Typography variant="body2" sx={{ fontWeight: 700 }}>Subtotal {ccy}</Typography></TableCell>
-                      <TableCell sx={{ display: { xs: "none", sm: "table-cell" } }} />
                       <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}>{fmtNum(rows.reduce((sum, row) => sum + row.quantity, 0), 2)}<Typography variant="caption" sx={{ display: "block" }} color="text.secondary">{rows.length} holdings</Typography></TableCell>
                       <TableCell />
                       <TableCell align="right" sx={{ display: { xs: "none", sm: "table-cell" }, fontVariantNumeric: "tabular-nums" }}>{fmtMoney(sumCost, ccy)}</TableCell>
                       <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}>{fmtMoney(sumMv, ccy)}</TableCell>
-                      <TableCell align="right" sx={{ display: { xs: "none", md: "table-cell" }, color: sumDay >= 0 ? "success.main" : "error.main", fontVariantNumeric: "tabular-nums" }}>{fmtMoney(sumDay, ccy)}</TableCell>
+                      <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}>{fmtPct(sumWeightPct, 1)}</TableCell>
                       <TableCell align="right" sx={{ display: { xs: "none", md: "table-cell" }, color: sumUnreal >= 0 ? "success.main" : "error.main", fontVariantNumeric: "tabular-nums" }}>{fmtMoney(sumUnreal, ccy)}<Typography variant="caption" sx={{ display: "block" }} color="inherit">{fmtPct(sumUnrealPct, 1)}</Typography></TableCell>
                       <TableCell align="right" sx={{ display: { xs: "none", md: "table-cell" }, color: sumReal >= 0 ? "success.main" : "error.main", fontVariantNumeric: "tabular-nums" }}>{fmtMoney(sumReal, ccy)}</TableCell>
                       <TableCell align="right" sx={{ display: { xs: "none", md: "table-cell" }, color: "warning.main", fontVariantNumeric: "tabular-nums" }}>{fmtMoney(sumDivs, ccy)}</TableCell>
@@ -294,12 +343,14 @@ function HoldingRow({ holding, ccy, selected, onSelect }: { holding: Holding; cc
   return (
     <TableRow hover selected={selected} onClick={onSelect} tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onSelect(); }} sx={{ cursor: "pointer" }}>
       <TableCell><Typography variant="body2" sx={{ fontWeight: 700 }}>{holding.name || holding.symbol}</Typography>{holding.name && <Typography variant="caption" color="text.secondary">{holding.symbol}</Typography>}</TableCell>
-      <TableCell sx={{ display: { xs: "none", sm: "table-cell" } }}><Chip size="small" label={marketLabel(holding.market)} variant="outlined" /></TableCell>
       <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}>{fmtNum(holding.quantity, 2)}<Typography variant="caption" sx={{ display: "block" }} color="text.secondary">avg {fmtNum(holding.avg_cost, 2)}</Typography></TableCell>
-      <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}>{holding.hasPrice ? fmtNum(holding.current_price, 2) : <Typography variant="caption" color="text.secondary">at cost</Typography>}</TableCell>
+      <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}>
+        {holding.hasPrice ? fmtNum(holding.current_price, 2) : <Typography variant="caption" color="text.secondary">at cost</Typography>}
+        <DailyChangeChip value={holding.day_change} pct={holding.day_change_pct} sx={{ display: "flex", width: "fit-content", ml: "auto", mt: 0.5 }} />
+      </TableCell>
       <TableCell align="right" sx={{ display: { xs: "none", sm: "table-cell" }, fontVariantNumeric: "tabular-nums" }}>{fmtMoney(holding.cost_basis, ccy)}</TableCell>
       <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums", fontWeight: 700 }}>{fmtMoney(holding.display_mv, ccy)}</TableCell>
-      <PnlCell value={holding.day_change ?? 0} pct={holding.day_change_pct ?? 0} ccy={ccy} sx={{ display: { xs: "none", md: "table-cell" } }} />
+      <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}>{fmtPct(holding.weight_pct, 1)}</TableCell>
       <PnlCell value={holding.unrealized_pnl ?? 0} pct={holding.unreal_pct} ccy={ccy} sx={{ display: { xs: "none", md: "table-cell" } }} />
       <TableCell align="right" sx={{ display: { xs: "none", md: "table-cell" }, color: (holding.realized_pnl ?? 0) >= 0 ? "success.main" : "error.main", fontVariantNumeric: "tabular-nums" }}>{fmtMoney(holding.realized_pnl ?? 0, ccy)}</TableCell>
       <TableCell align="right" sx={{ display: { xs: "none", md: "table-cell" }, color: "warning.main", fontVariantNumeric: "tabular-nums" }}>{fmtMoney(holding.dividends_received ?? 0, ccy)}</TableCell>
@@ -316,7 +367,6 @@ function HoldingCard({ holding, ccy, selected, onSelect }: { holding: Holding; c
   const isProfit = holding.display_pnl >= 0;
   const pnlColor = isProfit ? "success.main" : "error.main";
   const dayVal = holding.day_change ?? 0;
-  const dayColor = dayVal >= 0 ? "success.main" : "error.main";
   return (
     <Card variant="outlined" onClick={onSelect} tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onSelect(); }} sx={{ borderColor: selected ? "primary.main" : "divider", cursor: "pointer", boxShadow: selected ? 1 : 0 }}>
       <CardContent sx={{ p: 1.5, "&:last-child": { pb: 1.5 } }}>
@@ -331,7 +381,14 @@ function HoldingCard({ holding, ccy, selected, onSelect }: { holding: Holding; c
           <Box sx={{ textAlign: "right", flexShrink: 0 }}>
             <Typography variant="caption" color="text.secondary" sx={{ display: "block", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" }}>Market value</Typography>
             <Typography variant="body2" sx={{ fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{fmtMoneyCeil(holding.display_mv, ccy)}</Typography>
-            <Typography variant="caption" color={holding.day_change_pct == null ? "text.secondary" : dayColor} sx={{ fontVariantNumeric: "tabular-nums", fontWeight: 600 }}>{holding.day_change_pct == null ? "—" : `${dayVal >= 0 ? "▲" : "▼"} ${fmtPct(holding.day_change_pct, 1)}`}</Typography>
+            <Stack direction="row" spacing={0.75} sx={{ mt: 0.55, alignItems: "center", justifyContent: "flex-end", flexWrap: "wrap", rowGap: 0.5 }}>
+              <Typography variant="caption" color="text.secondary" sx={{ fontVariantNumeric: "tabular-nums", fontWeight: 600 }}>{fmtPct(holding.weight_pct, 1)} of portfolio</Typography>
+              {holding.day_change_pct == null ? (
+                <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>Daily —</Typography>
+              ) : (
+                <DailyChangeChip value={dayVal} pct={holding.day_change_pct} />
+              )}
+            </Stack>
           </Box>
         </Stack>
         <Divider sx={{ my: 1 }} />
@@ -350,6 +407,36 @@ function HoldingCard({ holding, ccy, selected, onSelect }: { holding: Holding; c
         </Stack>
       </CardContent>
     </Card>
+  );
+}
+
+function DailyChangeChip({ value, pct, sx }: { value?: number | null; pct?: number | null; sx?: any }) {
+  const theme = useTheme();
+  if (pct == null) return null;
+  const isPositive = (value ?? 0) >= 0;
+  const baseColor = isPositive ? theme.palette.success.main : theme.palette.error.main;
+  // Make small moves subtle and large moves more prominent; pct is decimal (0.01 = 1%).
+  const intensity = Math.min(Math.abs(pct) / 0.05, 1);
+  const textColor = theme.palette.mode === "dark"
+    ? (isPositive ? theme.palette.success.light : theme.palette.error.light)
+    : (isPositive ? theme.palette.success.dark : theme.palette.error.dark);
+  return (
+    <Chip
+      size="small"
+      label={`${isPositive ? "▲" : "▼"} ${fmtPct(pct, 1)}`}
+      sx={{
+        ...sx,
+        height: 22,
+        borderRadius: 1,
+        fontSize: "0.68rem",
+        fontWeight: 700,
+        fontVariantNumeric: "tabular-nums",
+        color: textColor,
+        backgroundColor: alpha(baseColor, 0.1 + intensity * 0.25),
+        border: `1px solid ${alpha(baseColor, 0.3 + intensity * 0.45)}`,
+        "& .MuiChip-label": { px: 0.8 },
+      }}
+    />
   );
 }
 

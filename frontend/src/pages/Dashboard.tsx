@@ -16,7 +16,7 @@ import MetricCard from "../components/ui/MetricCard";
 
 function Pct({ p, digits = 1 }: { p: number | null | undefined; digits?: number }) {
   if (p === null || p === undefined) return <Typography component="span" color="text.disabled">—</Typography>;
-  return <Typography component="span" color={p >= 0 ? "success.main" : "error.main"} sx={{ fontVariantNumeric: "tabular-nums" }}>{fmtPct(p, digits)}</Typography>;
+  return <Typography component="span" sx={{ color: p >= 0 ? "success.main" : "error.main", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{fmtPct(p, digits)}</Typography>;
 }
 
 export default function Dashboard() {
@@ -60,11 +60,20 @@ export default function Dashboard() {
                     { key: "dow", label: "Dow" },
                   ].map(({ key, label }) => {
                     const pct = data.benchmarks[key]?.change_pct;
+                    const formattedPct = pct != null ? fmtPct(pct, 2) : "—";
+                    const isNegative = pct != null && (pct < 0 || formattedPct.startsWith("-"));
                     return (
                       <Stack key={key} direction="row" spacing={0.5} sx={{ alignItems: "baseline" }}>
                         <Typography variant="caption" color="text.secondary">{label}</Typography>
-                        <Typography variant="caption" color={pct == null ? "text.disabled" : pct >= 0 ? "success.main" : "error.main"} sx={{ fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
-                          {pct != null ? fmtPct(pct, 2) : "—"}
+                        <Typography
+                          variant="caption"
+                          sx={{
+                            color: pct == null ? "text.disabled" : isNegative ? "error.main" : "success.main",
+                            fontWeight: 800,
+                            fontVariantNumeric: "tabular-nums",
+                          }}
+                        >
+                          {formattedPct}
                         </Typography>
                       </Stack>
                     );
@@ -128,7 +137,8 @@ function MoverList({ title, items, tone }: { title: string; items: any[]; tone: 
       <Stack spacing={0.5}>
         {items.length === 0 ? <Typography variant="body2" color="text.disabled">No data</Typography> : items.map((h: any) => (
           <Stack key={h.symbol} direction="row" sx={{ justifyContent: "space-between", gap: 1 }}>
-            <Typography variant="body2" noWrap sx={{ fontWeight: 600 }}>{h.name || h.symbol}</Typography>
+            <Typography variant="body2" noWrap sx={{ display: { xs: "none", sm: "block" }, fontWeight: 600 }} title={h.name || h.symbol}>{h.name || h.symbol}</Typography>
+            <Typography variant="body2" noWrap sx={{ display: { xs: "block", sm: "none" }, fontWeight: 700 }} title={h.name || h.symbol}>{h.symbol}</Typography>
             <Typography variant="body2" color={`${tone}.main`} sx={{ fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{fmtPct(h.change_pct_7d, 1)}</Typography>
           </Stack>
         ))}
@@ -143,16 +153,27 @@ function PillStat({ label, pct }: { label: string; pct: number | null | undefine
 
 function DayInline({ pct, amount, ccy }: { pct: number | null | undefined; amount: number | null | undefined; ccy: string }) {
   const hasData = pct !== null && pct !== undefined;
-  const good = (pct ?? 0) >= 0;
+  const formattedPct = hasData ? fmtPct(pct, 2) : "—";
+  const good = !hasData || !((pct ?? 0) < 0 || formattedPct.startsWith("-"));
   const Arrow = good ? ArrowUpwardRounded : ArrowDownwardRounded;
   return (
     <Box>
-      <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em" }}>Today</Typography>
+      <Typography variant="caption" sx={{ color: "text.primary", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em" }}>Today</Typography>
       {hasData ? (
         <Stack direction="row" spacing={0.75} sx={{ alignItems: "baseline", mt: 0.5, flexWrap: "wrap" }}>
           <Arrow fontSize="small" color={good ? "success" : "error"} />
-          <Typography variant="h2" color={good ? "success.main" : "error.main"} sx={{ fontSize: "1.35rem", fontVariantNumeric: "tabular-nums" }}>{fmtPct(pct, 2)}</Typography>
-          {amount !== null && amount !== undefined && <Typography variant="body2" color={good ? "success.main" : "error.main"} sx={{ opacity: 0.78, fontVariantNumeric: "tabular-nums" }}>{fmtMoney(amount, ccy)}</Typography>}
+          <Typography
+            variant="h2"
+            sx={{
+              color: good ? "success.main" : "error.main",
+              fontSize: "1.35rem",
+              fontWeight: 800,
+              fontVariantNumeric: "tabular-nums",
+            }}
+          >
+            {formattedPct}
+          </Typography>
+          {amount !== null && amount !== undefined && <Typography variant="body2" sx={{ color: good ? "success.main" : "error.main", opacity: 0.78, fontVariantNumeric: "tabular-nums" }}>{fmtMoney(amount, ccy)}</Typography>}
         </Stack>
       ) : <Typography variant="h2" color="text.disabled" sx={{ mt: 0.5 }}>—</Typography>}
     </Box>

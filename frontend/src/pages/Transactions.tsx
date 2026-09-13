@@ -708,10 +708,10 @@ export default function Transactions() {
       />
 
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2, 1fr)", md: "repeat(4, 1fr)" }, gap: 1.5 }}>
-        <MetricCard label="Transactions" value={txs.length} supporting={`${filtered.length} match current filters`} tone="primary" icon={<ReceiptLongOutlined fontSize="small" />} />
-        <MetricCard label="Symbols" value={symbols.size} supporting="unique instruments" />
-        <MetricCard label="Buys / sells" value={`${buyCount} / ${sellCount}`} supporting="recorded trade legs" />
-        <MetricCard label="Invested" value={fmtMoney(totalInvested, BASE_CCY)} supporting="estimated SGD base" tone="primary" />
+        <MetricCard label="Transactions" value={txs.length} tone="primary" icon={<ReceiptLongOutlined fontSize="small" />} />
+        <MetricCard label="Symbols" value={symbols.size} />
+        <MetricCard label="Buys / sells" value={`${buyCount} / ${sellCount}`} />
+        <MetricCard label="Invested" value={fmtMoney(totalInvested, BASE_CCY)} tone="primary" />
       </Box>
 
       {/* Filters */}

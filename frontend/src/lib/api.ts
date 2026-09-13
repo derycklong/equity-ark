@@ -5,6 +5,7 @@ export interface AdminUser {
   picture: string;
   created_at: number;
   last_login_at: number | null;
+  last_used_at: number | null;
 }
 
 const base = "";

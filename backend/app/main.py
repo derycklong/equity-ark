@@ -362,6 +362,7 @@ def get_current_user(request: Request) -> dict:
     user = request.app.state.store_manager.db.get_user(sess["user_id"])
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
+    user["last_used_at"] = request.app.state.store_manager.db.touch_user(user["id"])
     return user
 
 

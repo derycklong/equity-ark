@@ -35,7 +35,7 @@ function fmtTs(ts: number | null | undefined): string {
   return fmtDate(new Date(ts * 1000).toISOString().slice(0, 10));
 }
 
-type SortKey = "email" | "last_login_at" | "created_at";
+type SortKey = "email" | "last_login_at" | "last_used_at" | "created_at";
 
 export default function Admin() {
   const { data, isLoading, error, refetch, isFetching } = useQuery({
@@ -104,9 +104,9 @@ export default function Admin() {
           renderCard={(user) => <UserCard user={user} isAdmin={adminEmails.includes(user.email.toLowerCase())} />}
           renderTable={() => (
             <TableContainer sx={{ overflowX: "auto" }}>
-              <Table size="small" sx={{ minWidth: 700 }}>
-                <TableHead><TableRow><TableCell>User</TableCell><TableCell><TableSortLabel active={sortKey === "email"} direction={sortKey === "email" ? (sortDesc ? "desc" : "asc") : "asc"} onClick={() => handleSort("email")}>Email</TableSortLabel></TableCell><TableCell align="right"><TableSortLabel active={sortKey === "last_login_at"} direction={sortKey === "last_login_at" ? (sortDesc ? "desc" : "asc") : "asc"} onClick={() => handleSort("last_login_at")}>Last login</TableSortLabel></TableCell><TableCell align="right"><TableSortLabel active={sortKey === "created_at"} direction={sortKey === "created_at" ? (sortDesc ? "desc" : "asc") : "asc"} onClick={() => handleSort("created_at")}>Joined</TableSortLabel></TableCell></TableRow></TableHead>
-                <TableBody>{filtered.map((user) => { const isAdmin = adminEmails.includes(user.email.toLowerCase()); return <TableRow key={user.id} hover><TableCell><UserIdentity user={user} isAdmin={isAdmin} /></TableCell><TableCell sx={{ color: "text.secondary" }}>{user.email}</TableCell><TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{fmtTs(user.last_login_at)}</TableCell><TableCell align="right" sx={{ color: "text.secondary", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{fmtTs(user.created_at)}</TableCell></TableRow>; })}</TableBody>
+              <Table size="small" sx={{ minWidth: 820 }}>
+                <TableHead><TableRow><TableCell>User</TableCell><TableCell><TableSortLabel active={sortKey === "email"} direction={sortKey === "email" ? (sortDesc ? "desc" : "asc") : "asc"} onClick={() => handleSort("email")}>Email</TableSortLabel></TableCell><TableCell align="right"><TableSortLabel active={sortKey === "last_login_at"} direction={sortKey === "last_login_at" ? (sortDesc ? "desc" : "asc") : "asc"} onClick={() => handleSort("last_login_at")}>Last login</TableSortLabel></TableCell><TableCell align="right"><TableSortLabel active={sortKey === "last_used_at"} direction={sortKey === "last_used_at" ? (sortDesc ? "desc" : "asc") : "asc"} onClick={() => handleSort("last_used_at")}>Last used</TableSortLabel></TableCell><TableCell align="right"><TableSortLabel active={sortKey === "created_at"} direction={sortKey === "created_at" ? (sortDesc ? "desc" : "asc") : "asc"} onClick={() => handleSort("created_at")}>Joined</TableSortLabel></TableCell></TableRow></TableHead>
+                <TableBody>{filtered.map((user) => { const isAdmin = adminEmails.includes(user.email.toLowerCase()); return <TableRow key={user.id} hover><TableCell><UserIdentity user={user} isAdmin={isAdmin} /></TableCell><TableCell sx={{ color: "text.secondary" }}>{user.email}</TableCell><TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{fmtTs(user.last_login_at)}</TableCell><TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{fmtTs(user.last_used_at)}</TableCell><TableCell align="right" sx={{ color: "text.secondary", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{fmtTs(user.created_at)}</TableCell></TableRow>; })}</TableBody>
               </Table>
             </TableContainer>
           )}
@@ -121,5 +121,5 @@ function UserIdentity({ user, isAdmin }: { user: AdminUser; isAdmin: boolean }) 
 }
 
 function UserCard({ user, isAdmin }: { user: AdminUser; isAdmin: boolean }) {
-  return <Card variant="outlined"><CardContent sx={{ p: 1.5, "&:last-child": { pb: 1.5 } }}><UserIdentity user={user} isAdmin={isAdmin} /><Stack direction="row" spacing={2} sx={{ mt: 1.25, pt: 1.25, borderTop: 1, borderColor: "divider" }}><Box><Typography variant="caption" color="text.secondary">Last login</Typography><Typography variant="body2" sx={{ fontVariantNumeric: "tabular-nums" }}>{fmtTs(user.last_login_at)}</Typography></Box><Box><Typography variant="caption" color="text.secondary">Joined</Typography><Typography variant="body2" sx={{ fontVariantNumeric: "tabular-nums" }}>{fmtTs(user.created_at)}</Typography></Box></Stack></CardContent></Card>;
+  return <Card variant="outlined"><CardContent sx={{ p: 1.5, "&:last-child": { pb: 1.5 } }}><UserIdentity user={user} isAdmin={isAdmin} /><Stack direction="row" spacing={2} sx={{ mt: 1.25, pt: 1.25, borderTop: 1, borderColor: "divider" }}><Box><Typography variant="caption" color="text.secondary">Last login</Typography><Typography variant="body2" sx={{ fontVariantNumeric: "tabular-nums" }}>{fmtTs(user.last_login_at)}</Typography></Box><Box><Typography variant="caption" color="text.secondary">Last used</Typography><Typography variant="body2" sx={{ fontVariantNumeric: "tabular-nums" }}>{fmtTs(user.last_used_at)}</Typography></Box><Box><Typography variant="caption" color="text.secondary">Joined</Typography><Typography variant="body2" sx={{ fontVariantNumeric: "tabular-nums" }}>{fmtTs(user.created_at)}</Typography></Box></Stack></CardContent></Card>;
 }
