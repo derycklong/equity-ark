@@ -2,7 +2,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { Box, Button, Card, CardContent, Chip, Collapse, Divider, IconButton, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TableSortLabel, TextField, ToggleButton, ToggleButtonGroup, Typography } from "@mui/material";
 import ExpandMoreRounded from "@mui/icons-material/ExpandMoreRounded";
 import CompareArrowsOutlined from "@mui/icons-material/CompareArrowsOutlined";
-import { fmtNum, fmtDate, fmtPct, ccySymbol } from "../lib/utils";
+import { fmtNum, fmtDate, fmtPct, fmtMoneyFull, ccySymbol } from "../lib/utils";
 import { useRoundtrips } from "../hooks/usePortfolio";
 import { LoadingScreen } from "../components/LoadingScreen";
 import MobileTable from "../components/MobileTable";
@@ -26,10 +26,13 @@ type Roundtrip = {
   fees: number;
   pnl: number;
   pnl_pct: number;
+  pnl_base: number;
+  pnl_base_currency?: string;
+  fx_rate_to_base?: number;
   hold_days: number;
 };
 
-type SortKey = "sell_date" | "buy_date" | "pnl" | "pnl_pct" | "hold_days";
+type SortKey = "sell_date" | "buy_date" | "pnl" | "pnl_base" | "pnl_pct" | "hold_days";
 
 type SellLeg = {
   buy_date: string;
@@ -53,6 +56,7 @@ type SellGroup = {
   total_proceeds: number;
   total_cost: number;
   total_pnl: number;
+  total_pnl_base: number;
   weighted_pnl_pct: number;
   min_hold: number;
   max_hold: number;
@@ -80,6 +84,7 @@ function groupBySell(rows: Roundtrip[]): SellGroup[] {
         total_proceeds: 0,
         total_cost: 0,
         total_pnl: 0,
+        total_pnl_base: 0,
         weighted_pnl_pct: 0,
         min_hold: Infinity,
         max_hold: 0,
@@ -91,6 +96,7 @@ function groupBySell(rows: Roundtrip[]): SellGroup[] {
     g.total_proceeds += r.proceeds;
     g.total_cost += r.cost;
     g.total_pnl += r.pnl;
+    g.total_pnl_base += r.pnl_base;
     g.legs.push({
       buy_date: r.buy_date,
       buy_price: r.buy_price,
@@ -205,7 +211,7 @@ const [sortDesc, setSortDesc] = useState(true);
     // The tie-breakers always sort: sell_price ASC, buy_date DESC, buy_price DESC.
     rows.sort((a, b) => {
       let av: any = a[sortKey], bv: any = b[sortKey];
-      if (sortKey === "pnl" || sortKey === "pnl_pct") {
+      if (sortKey === "pnl" || sortKey === "pnl_base" || sortKey === "pnl_pct") {
         av = parseFloat(av);
         bv = parseFloat(bv);
       }
@@ -248,12 +254,13 @@ const [sortDesc, setSortDesc] = useState(true);
   }, [filtered]);
 
   const stats = useMemo(() => {
-    const total = rts.length;
-    const wins = rts.filter((r) => r.pnl > 0).length;
-    const losses = rts.filter((r) => r.pnl < 0).length;
-    const totalPnl = rts.reduce((s, r) => s + r.pnl, 0);
-    return { total, wins, losses, totalPnl };
-  }, [rts]);
+    const total = filtered.length;
+    const wins = filtered.filter((r) => r.pnl > 0).length;
+    const losses = filtered.filter((r) => r.pnl < 0).length;
+    const totalPnl = filtered.reduce((s, r) => s + r.pnl, 0);
+    const totalPnlBase = filtered.reduce((s, r) => s + r.pnl_base, 0);
+    return { total, wins, losses, totalPnl, totalPnlBase };
+  }, [filtered]);
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) setSortDesc((d) => !d);
@@ -273,7 +280,7 @@ const [sortDesc, setSortDesc] = useState(true);
       <PageHeader
         title="Closed positions"
         icon={<CompareArrowsOutlined />}
-        subtitle={`${filtered.length} roundtrips · ${stats.wins} winners · ${stats.losses} losers`}
+        subtitle={`${filtered.length} roundtrips · ${stats.wins} winners · ${stats.losses} losers · SGD P&L ${fmtMoneyFull(stats.totalPnlBase, "SGD")}`}
         actions={
           <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ width: { xs: "100%", sm: "auto" }, justifyContent: { xs: "stretch", sm: "flex-end" } }}>
           <TextField
@@ -329,6 +336,7 @@ const [sortDesc, setSortDesc] = useState(true);
                       <Typography variant="caption" color="text.secondary" sx={{ display: "block", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em" }}>P&amp;L</Typography>
                       <Typography variant="body1" sx={{ color: isProfit ? "success.main" : "error.main", fontWeight: 750, fontVariantNumeric: "tabular-nums" }}>{isProfit ? "+" : "−"}{sym}{fmtNum(Math.abs(g.total_pnl), 2)}</Typography>
                       <Typography variant="caption" sx={{ color: isProfit ? "success.main" : "error.main", fontVariantNumeric: "tabular-nums" }}>{fmtPct(g.weighted_pnl_pct, 1)}</Typography>
+                      <Typography variant="caption" color="text.secondary" sx={{ display: "block", fontVariantNumeric: "tabular-nums" }}>{fmtMoneyFull(g.total_pnl_base, "SGD")} at sell-date FX</Typography>
                     </Box>
                     <IconButton size="small" sx={{ minWidth: 32, minHeight: 32, flexShrink: 0 }} onClick={() => toggleExpanded(g.key)} aria-expanded={isOpen} aria-label={isOpen ? "Collapse legs" : "Expand legs"}>
                       <ExpandMoreRounded fontSize="small" sx={{ transform: isOpen ? "rotate(180deg)" : "none", transition: "transform 160ms" }} />
@@ -368,11 +376,11 @@ const [sortDesc, setSortDesc] = useState(true);
           }}
           renderTable={() => (
             <TableContainer sx={{ overflow: "auto", height: "100%" }}>
-              <Table stickyHeader size="small" sx={{ minWidth: 1180 }}>
+              <Table stickyHeader size="small" sx={{ minWidth: 1300 }}>
                 <TableHead><TableRow>
                   <TableCell>Symbol</TableCell><TableCell sx={{ display: { xs: "none", md: "table-cell" } }}>Market</TableCell>
                   <SortHeader label="Buy date" statKey="buy_date" /><TableCell align="right" sx={{ display: { xs: "none", sm: "table-cell" } }}>Buy price</TableCell><TableCell align="right" sx={{ display: { xs: "none", sm: "table-cell" } }}>Buy qty</TableCell><TableCell align="right" sx={{ display: { xs: "none", sm: "table-cell" } }}>Cost</TableCell>
-                  <SortHeader label="Sell date" statKey="sell_date" /><TableCell align="right" sx={{ display: { xs: "none", sm: "table-cell" } }}>Sell price</TableCell><TableCell align="right" sx={{ display: { xs: "none", sm: "table-cell" } }}>Sell qty</TableCell><TableCell align="right" sx={{ display: { xs: "none", sm: "table-cell" } }}>Proceeds</TableCell><TableCell align="right">P&amp;L</TableCell><SortHeader label="P&amp;L %" statKey="pnl_pct" /><SortHeader label="Hold" statKey="hold_days" />
+                  <SortHeader label="Sell date" statKey="sell_date" /><TableCell align="right" sx={{ display: { xs: "none", sm: "table-cell" } }}>Sell price</TableCell><TableCell align="right" sx={{ display: { xs: "none", sm: "table-cell" } }}>Sell qty</TableCell><TableCell align="right" sx={{ display: { xs: "none", sm: "table-cell" } }}>Proceeds</TableCell><TableCell align="right">P&amp;L</TableCell><SortHeader label="P&amp;L (SGD)" statKey="pnl_base" /><SortHeader label="P&amp;L %" statKey="pnl_pct" /><SortHeader label="Hold" statKey="hold_days" />
                 </TableRow></TableHead>
                 <TableBody>
                   {filtered.map((rt, i) => {
@@ -386,7 +394,7 @@ const [sortDesc, setSortDesc] = useState(true);
                     const sym = ccySymbol(rt.currency);
                     return (
                       <>
-                        {symbolBreakIdx.has(i) && <TableRow><TableCell colSpan={13} sx={{ height: 4, p: 0, bgcolor: "divider" }} /></TableRow>}
+                        {symbolBreakIdx.has(i) && <TableRow><TableCell colSpan={14} sx={{ height: 4, p: 0, bgcolor: "divider" }} /></TableRow>}
                         <TableRow key={i} hover>
                           <TableCell><Typography variant="body2" sx={{ fontWeight: 650 }}>{rt.name || rt.symbol}</Typography>{rt.name && <Typography variant="caption" color="text.secondary">{rt.symbol}</Typography>}</TableCell>
                           <TableCell sx={{ display: { xs: "none", md: "table-cell" } }}><Chip size="small" label={rt.market} variant="outlined" /></TableCell>
@@ -403,6 +411,7 @@ const [sortDesc, setSortDesc] = useState(true);
                           </>}
                           <TableCell align="right" sx={{ display: { xs: "none", sm: "table-cell" }, fontVariantNumeric: "tabular-nums" }}>{sym}{fmtNum(rt.proceeds, 2)}<Typography variant="caption" sx={{ display: "block" }} color="text.secondary">{fmtNum(rt.quantity, 0)} sh</Typography></TableCell>
                           <TableCell align="right" sx={{ fontWeight: 700, fontVariantNumeric: "tabular-nums" }}><Typography component="span" sx={{ color: isProfit ? "success.main" : "error.main", fontWeight: 700 }}>{isProfit ? "+" : "−"}{sym}{fmtNum(Math.abs(rt.pnl), 2)}</Typography></TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 700, fontVariantNumeric: "tabular-nums" }}><Typography component="span" sx={{ color: isProfit ? "success.main" : "error.main", fontWeight: 700 }}>{fmtMoneyFull(rt.pnl_base, "SGD")}</Typography><Typography variant="caption" sx={{ display: "block" }} color="text.secondary">sell-date FX</Typography></TableCell>
                           <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}><Typography component="span" sx={{ color: isProfit ? "success.main" : "error.main" }}>{fmtPct(rt.pnl_pct, 1)}</Typography></TableCell>
                           <TableCell align="right" sx={{ color: "text.secondary", whiteSpace: "nowrap" }}>{formatHoldDays(rt.hold_days)}</TableCell>
                         </TableRow>

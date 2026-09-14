@@ -64,14 +64,20 @@ interface HoldingBase {
   current_price?: number | null;
   market_value?: number | null;
   market_value_base?: number | null;
+  cost_basis_base?: number | null;
   base_currency?: string;
   unrealized_pnl?: number | null;
+  unrealized_pnl_base?: number | null;
   unrealized_pnl_pct?: number | null;
   day_change_pct?: number | null;
   day_change?: number | null;
   realized_pnl: number;
+  realized_pnl_base?: number | null;
   first_acquired?: string;
   dividends_received: number;
+  dividends_received_base?: number | null;
+  total_pnl_base?: number | null;
+  total_pnl_base_pct?: number | null;
   lots?: any[];
   label?: string;
 }
@@ -201,11 +207,21 @@ export default function Holdings() {
   }, [filtered]);
 
   const markets = Array.from(new Set(holdings.map((holding: HoldingBase) => holding.market))).sort();
-  const totals = filtered.reduce((acc, holding) => ({
+  const visibleTotals = filtered.reduce((acc, holding) => ({
     marketValue: acc.marketValue + (holding.market_value_base ?? (holding.currency === "SGD" ? holding.display_mv : 0)),
-    cost: acc.cost + holding.cost_basis,
-    pnl: acc.pnl + holding.display_pnl,
+    cost: acc.cost + (holding.cost_basis_base ?? (holding.currency === "SGD" ? holding.cost_basis : 0)),
+    pnl: acc.pnl + (holding.total_pnl_base ?? (holding.currency === "SGD" ? holding.display_pnl : 0)),
   }), { marketValue: 0, cost: 0, pnl: 0 });
+  const portfolioTotals = holdingsData?.totals;
+  const totals = !filter.trim() && !marketFilter && portfolioTotals
+    ? {
+        marketValue: portfolioTotals.market_value ?? 0,
+        cost: portfolioTotals.cost_basis ?? 0,
+        pnl: portfolioTotals.total_pnl ?? 0,
+      }
+    : visibleTotals;
+  const allPnl = portfolioTotals?.total_pnl ?? visibleTotals.pnl;
+  const allPnlPct = portfolioTotals?.total_pnl_pct ?? (totals.cost > 0 ? allPnl / totals.cost : 0);
 
   if (isLoading) return <LoadingScreen />;
 
@@ -230,7 +246,7 @@ export default function Holdings() {
         <Card variant="outlined">
           <CardContent sx={{ p: 1.5, "&:last-child": { pb: 1.5 } }}>
             <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em" }}>Portfolio summary</Typography>
-            <Box sx={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 1, fontVariantNumeric: "tabular-nums" }}>
+            <Box sx={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 1, fontVariantNumeric: "tabular-nums" }}>
               <Box sx={{ minWidth: 0 }}>
                 <Typography variant="caption" color="text.secondary" sx={{ display: "block", fontWeight: 700 }}>Market value</Typography>
                 <Typography variant="body2" color="primary.main" sx={{ mt: 0.25, fontWeight: 700 }} noWrap>{fmtMoney(totals.marketValue, "SGD")}</Typography>
@@ -240,18 +256,24 @@ export default function Holdings() {
                 <Typography variant="body2" sx={{ mt: 0.25, fontWeight: 700 }} noWrap>{fmtMoney(totals.cost, "SGD")}</Typography>
               </Box>
               <Box sx={{ minWidth: 0 }}>
-                <Typography variant="caption" color="text.secondary" sx={{ display: "block", fontWeight: 700 }}>Total P&amp;L</Typography>
-                <Typography variant="body2" sx={{ mt: 0.25, color: totals.pnl >= 0 ? "success.main" : "error.main", fontWeight: 700 }} noWrap>{fmtMoney(totals.pnl, "SGD")}</Typography>
-                <Typography variant="caption" sx={{ color: totals.pnl >= 0 ? "success.main" : "error.main", fontWeight: 600 }} noWrap>{totals.cost > 0 ? fmtPct(totals.pnl / totals.cost, 1) : "—"}</Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ display: "block", fontWeight: 700 }}>P&amp;L · open tickers</Typography>
+                <Typography variant="body2" sx={{ mt: 0.25, color: visibleTotals.pnl >= 0 ? "success.main" : "error.main", fontWeight: 700 }} noWrap>{fmtMoney(visibleTotals.pnl, "SGD")}</Typography>
+                <Typography variant="caption" sx={{ color: visibleTotals.pnl >= 0 ? "success.main" : "error.main", fontWeight: 600 }} noWrap>{visibleTotals.cost > 0 ? fmtPct(visibleTotals.pnl / visibleTotals.cost, 1) : "—"}</Typography>
+              </Box>
+              <Box sx={{ minWidth: 0 }}>
+                <Typography variant="caption" color="text.secondary" sx={{ display: "block", fontWeight: 700 }}>P&amp;L · all tickers</Typography>
+                <Typography variant="body2" sx={{ mt: 0.25, color: allPnl >= 0 ? "success.main" : "error.main", fontWeight: 700 }} noWrap>{fmtMoney(allPnl, "SGD")}</Typography>
+                <Typography variant="caption" sx={{ color: allPnl >= 0 ? "success.main" : "error.main", fontWeight: 600 }} noWrap>{fmtPct(allPnlPct, 1)}</Typography>
               </Box>
             </Box>
           </CardContent>
         </Card>
       ) : (
-        <Box sx={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 1.5 }}>
+        <Box sx={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 1.5 }}>
           <MetricCard label="Market value" value={fmtMoney(totals.marketValue, "SGD")} tone="primary" icon={<AccountBalanceWalletOutlined fontSize="small" />} />
           <MetricCard label="Cost basis" value={fmtMoney(totals.cost, "SGD")} tone="default" />
-          <MetricCard label="Total P&L" value={fmtMoney(totals.pnl, "SGD")} meta={totals.cost > 0 ? fmtPct(totals.pnl / totals.cost, 1) : undefined} tone={totals.pnl >= 0 ? "success" : "error"} icon={totals.pnl >= 0 ? <ArrowUpwardRounded fontSize="small" /> : <ArrowDownwardRounded fontSize="small" />} />
+          <MetricCard label="Total P&L · open tickers" value={fmtMoney(visibleTotals.pnl, "SGD")} meta={visibleTotals.cost > 0 ? fmtPct(visibleTotals.pnl / visibleTotals.cost, 1) : undefined} tone={visibleTotals.pnl >= 0 ? "success" : "error"} icon={visibleTotals.pnl >= 0 ? <ArrowUpwardRounded fontSize="small" /> : <ArrowDownwardRounded fontSize="small" />} />
+          <MetricCard label="Total P&L · all tickers" value={fmtMoney(allPnl, "SGD")} meta={fmtPct(allPnlPct, 1)} tone={allPnl >= 0 ? "success" : "error"} icon={allPnl >= 0 ? <ArrowUpwardRounded fontSize="small" /> : <ArrowDownwardRounded fontSize="small" />} />
         </Box>
       )}
 

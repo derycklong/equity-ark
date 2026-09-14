@@ -696,8 +696,10 @@ def portfolio_currency_breakdown(base_currency: str = "SGD", store: PortfolioSto
 def portfolio_holdings(refresh: bool = Query(False), store: PortfolioStore = Depends(get_user_store)) -> dict:
     if refresh:
         store.refresh_prices()
+    holdings = store.get_holdings()
     return {
-        "holdings": store.get_holdings(),
+        "holdings": holdings,
+        "totals": store.get_holdings_totals(holdings),
         "prices": store.get_prices(),
     }
 

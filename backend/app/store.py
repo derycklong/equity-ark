@@ -39,6 +39,8 @@ from .services.fx import FxService
 
 logger = logging.getLogger(__name__)
 
+DASHBOARD_CALCULATION_VERSION = 2
+
 
 class PortfolioStore:
     def __init__(self, db: Database, user_id: str, market_data: MarketDataService | None = None):
@@ -1150,6 +1152,7 @@ class PortfolioStore:
                 benchmarks = self.get_benchmarks()
                 now_ts = time.time()
                 cache = {
+                    "calculation_version": DASHBOARD_CALCULATION_VERSION,
                     "summary": summary,
                     "breakdown": breakdown,
                     "profile": profile,
@@ -1187,6 +1190,10 @@ class PortfolioStore:
         if cached is None:
             return None
         data = cached["data"]
+        if data.get("calculation_version") != DASHBOARD_CALCULATION_VERSION:
+            # Force one rebuild after calculation semantics change (for
+            # example, historical FX conversion for dividends).
+            return None
         if "last_refreshed_at" not in data:
             data["last_refreshed_at"] = cached.get("updated_at")
         return data
@@ -1283,6 +1290,35 @@ class PortfolioStore:
     def get_holdings(self) -> List[dict]:
         with self._lock:
             out = []
+            base_currency = "SGD"
+
+            def historical_to_base(amount: float, currency: str, date_str: str) -> float:
+                if currency == base_currency:
+                    return amount
+                return amount * self.fx.get_historical_rate(currency, base_currency, date_str)
+
+            # Keep realized P&L and dividends partitioned by symbol/currency so
+            # multi-currency holdings do not accidentally mix native amounts.
+            realized_native_by_key: Dict[tuple[str, str], float] = defaultdict(float)
+            realized_base_by_key: Dict[tuple[str, str], float] = defaultdict(float)
+            for r in self.roundtrips:
+                sell_date = r.sell_date.isoformat() if hasattr(r.sell_date, "isoformat") else str(r.sell_date)
+                realized_native_by_key[(r.symbol.upper(), r.currency)] += r.pnl
+                realized_base_by_key[(r.symbol.upper(), r.currency)] += historical_to_base(
+                    r.pnl, r.currency, sell_date
+                )
+            dividends_native_by_key: Dict[tuple[str, str], float] = defaultdict(float)
+            dividends_base_by_key: Dict[tuple[str, str], float] = defaultdict(float)
+            for e in self.dividend_events:
+                ex_date = e.get("ex_date", "")
+                key = (e["symbol"].upper(), e.get("currency", ""))
+                dividends_native_by_key[key] += e.get("total_received", 0.0) or 0.0
+                dividends_base_by_key[(e["symbol"].upper(), e.get("currency", ""))] += historical_to_base(
+                    e.get("total_received", 0.0) or 0.0,
+                    e.get("currency", ""),
+                    ex_date,
+                )
+
             seven_day_changes = self.market_data.get_7d_changes([
                 h.get("yahoo_symbol") or h["symbol"]
                 for h in self.holdings
@@ -1327,13 +1363,98 @@ class PortfolioStore:
                 # Holdings rows keep market_value in their native currency for
                 # per-currency tables. Also expose a base-currency value so
                 # clients do not accidentally add USD/HKD/SGD amounts together.
-                base_currency = "SGD"
                 fx_rate = self.fx.get(hh["currency"], base_currency)
                 hh["market_value_base"] = round((hh.get("market_value") or 0.0) * fx_rate, 2)
+                lots = h.get("lots") or []
+                cost_basis_base = sum(
+                    historical_to_base(
+                        lot.get("cost_basis", 0.0),
+                        hh["currency"],
+                        lot.get("acquired", ""),
+                    )
+                    for lot in lots
+                )
+                if not lots:
+                    cost_basis_base = hh["cost_basis"] * fx_rate
+                hh["cost_basis_base"] = round(cost_basis_base, 2)
+
+                # For priced securities, SGD unrealized P&L is current value
+                # minus the historical-FX cost basis. Bonds/cash are held at
+                # face value and therefore use the same FX-aware comparison;
+                # unknown unpriced assets retain zero native P&L.
+                if cur_px is not None or h.get("market") in ("sg_bond", "cash"):
+                    hh["unrealized_pnl_base"] = round(
+                        (hh.get("market_value_base") or 0.0) - cost_basis_base, 2
+                    )
+                else:
+                    hh["unrealized_pnl_base"] = 0.0
+
+                key = (h["symbol"].upper(), hh["currency"])
+                hh["realized_pnl"] = round(realized_native_by_key.get(key, 0.0), 2)
+                hh["realized_pnl_base"] = round(realized_base_by_key.get(key, 0.0), 2)
                 hh["base_currency"] = base_currency
-                hh["dividends_received"] = round(self.dividends_by_symbol.get(h["symbol"], 0.0), 2)
+                hh["dividends_received"] = round(dividends_native_by_key.get(key, 0.0), 2)
+                hh["dividends_received_base"] = round(dividends_base_by_key.get(key, 0.0), 2)
+                hh["total_pnl_base"] = round(
+                    hh["unrealized_pnl_base"]
+                    + hh["realized_pnl_base"]
+                    + hh["dividends_received_base"],
+                    2,
+                )
+                hh["total_pnl_base_pct"] = round(
+                    hh["total_pnl_base"] / cost_basis_base, 4
+                    if cost_basis_base else 0.0,
+                )
                 out.append(hh)
             return out
+
+    def get_holdings_totals(self, holdings: Optional[List[dict]] = None) -> dict:
+        """Return SGD totals for the Holdings summary.
+
+        Open market value/cost/unrealized values come from the current open
+        holdings. Realized P&L and dividends include fully closed symbols too,
+        since they are part of total portfolio return even when no Holdings row
+        remains for that symbol.
+        """
+        with self._lock:
+            rows = holdings if holdings is not None else self.get_holdings()
+            base_currency = "SGD"
+
+            def historical_to_base(amount: float, currency: str, date_str: str) -> float:
+                if currency == base_currency:
+                    return amount
+                return amount * self.fx.get_historical_rate(currency, base_currency, date_str)
+
+            market_value = sum(row.get("market_value_base", 0.0) or 0.0 for row in rows)
+            cost_basis = sum(row.get("cost_basis_base", 0.0) or 0.0 for row in rows)
+            unrealized = sum(row.get("unrealized_pnl_base", 0.0) or 0.0 for row in rows)
+            realized = sum(
+                historical_to_base(
+                    r.pnl,
+                    r.currency,
+                    r.sell_date.isoformat() if hasattr(r.sell_date, "isoformat") else str(r.sell_date),
+                )
+                for r in self.roundtrips
+            )
+            dividends = sum(
+                historical_to_base(
+                    e.get("total_received", 0.0) or 0.0,
+                    e.get("currency", ""),
+                    e.get("ex_date", ""),
+                )
+                for e in self.dividend_events
+            )
+            total_pnl = unrealized + realized + dividends
+            return {
+                "base_currency": base_currency,
+                "market_value": round(market_value, 2),
+                "cost_basis": round(cost_basis, 2),
+                "unrealized_pnl": round(unrealized, 2),
+                "realized_pnl": round(realized, 2),
+                "dividends": round(dividends, 2),
+                "total_pnl": round(total_pnl, 2),
+                "total_pnl_pct": round(total_pnl / cost_basis, 4) if cost_basis else 0.0,
+            }
 
     def get_transactions(self) -> List[dict]:
         with self._lock:
@@ -1376,6 +1497,18 @@ class PortfolioStore:
                         nm = (self._prices.get(sym, {}) or {}).get("name") or ""
                     if nm:
                         name_map[sym] = nm
+            fx_rate_cache: Dict[tuple[str, str], float] = {}
+
+            def roundtrip_fx_rate(r) -> float:
+                key = (r.currency, r.sell_date.isoformat())
+                if key not in fx_rate_cache:
+                    fx_rate_cache[key] = (
+                        1.0
+                        if r.currency == "SGD"
+                        else self.fx.get_historical_rate(r.currency, "SGD", key[1])
+                    )
+                return fx_rate_cache[key]
+
             return [
                 {
                     "symbol": r.symbol,
@@ -1394,6 +1527,9 @@ class PortfolioStore:
                     "fees": round(r.fees, 2),
                     "pnl": round(r.pnl, 2),
                     "pnl_pct": round(r.pnl_pct, 4),
+                    "pnl_base": round(r.pnl * roundtrip_fx_rate(r), 2),
+                    "pnl_base_currency": "SGD",
+                    "fx_rate_to_base": round(roundtrip_fx_rate(r), 8),
                     "hold_days": r.hold_days,
                     "name": name_map.get(r.symbol.upper(), ""),
                 }
@@ -1405,17 +1541,17 @@ class PortfolioStore:
             summary = dict(self.dividend_summary)
             base_ccy = "SGD"
 
-            def to_base(amt: float, ccy: str) -> float:
+            def to_base(amt: float, ccy: str, date_str: str) -> float:
                 if not amt or ccy == base_ccy:
                     return amt
                 try:
-                    return amt * self.fx.get(ccy, base_ccy)
+                    return amt * self.fx.get_historical_rate(ccy, base_ccy, date_str)
                 except Exception:
                     return 0.0
 
             # Add base-currency total + by-year-base
             total_base = sum(
-                to_base(e.get("total_received", 0) or 0, e.get("currency", ""))
+                to_base(e.get("total_received", 0) or 0, e.get("currency", ""), e.get("ex_date", ""))
                 for e in self.dividend_events
             )
             summary["total_received_base"] = round(total_base, 2)
@@ -1424,15 +1560,22 @@ class PortfolioStore:
             by_year_base: Dict[str, float] = defaultdict(float)
             for e in self.dividend_events:
                 y = (e.get("ex_date") or "")[:4] or "unknown"
-                by_year_base[y] += to_base(e.get("total_received", 0) or 0, e.get("currency", ""))
+                by_year_base[y] += to_base(
+                    e.get("total_received", 0) or 0,
+                    e.get("currency", ""),
+                    e.get("ex_date", ""),
+                )
             summary["by_year_base"] = {y: round(v, 2) for y, v in sorted(by_year_base.items())}
 
             # Annotate by_symbol with total in base currency
             by_symbol_base: Dict[str, float] = defaultdict(float)
             for e in self.dividend_events:
-                by_symbol_base[e["symbol"]] += to_base(
-                    e.get("total_received", 0) or 0, e.get("currency", "")
-                )
+                e["total_received_base"] = round(to_base(
+                    e.get("total_received", 0) or 0,
+                    e.get("currency", ""),
+                    e.get("ex_date", ""),
+                ), 2)
+                by_symbol_base[e["symbol"]] += e["total_received_base"]
             summary["by_symbol"] = [
                 {**row, "total_base": round(by_symbol_base.get(row["symbol"], 0.0), 2)}
                 for row in summary.get("by_symbol", [])
@@ -1732,16 +1875,33 @@ class PortfolioStore:
                 capital_in_by_ccy=dict(capital_in_by_ccy),
                 total_capital_base=capital_base,
                 fx_service=self.fx,
+                dividend_events=self.dividend_events,
             )
 
             # ----- header metrics in base currency -----
             current_value_base = breakdown["totals"]["current_value"]
             realised_base = sum(
-                r.pnl * (fx_rates.get(r.currency, 1.0))
+                r.pnl * (
+                    1.0
+                    if r.currency == base_currency
+                    else self.fx.get_historical_rate(
+                        r.currency,
+                        base_currency,
+                        r.sell_date.isoformat(),
+                    )
+                )
                 for r in self.roundtrips
             )
             divs_base = sum(
-                e["total_received"] * (fx_rates.get(e["currency"], 1.0))
+                e["total_received"] * (
+                    1.0
+                    if e["currency"] == base_currency
+                    else self.fx.get_historical_rate(
+                        e["currency"],
+                        base_currency,
+                        e["ex_date"],
+                    )
+                )
                 for e in self.dividend_events
             )
             twr = compute_twr(

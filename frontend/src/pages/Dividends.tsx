@@ -96,57 +96,18 @@ export default function Dividends() {
   const avgMonthlyLastFullYear = Number(yearTotalsSgd[lastFullYear] || 0) / 12;
   const maxYearSgd = Math.max(...Object.values(yearTotalsSgd).map((v) => Number(v)), 1);
 
-  // Per-currency per-year for the stacked bar
+  // Per-currency per-year for the stacked bar. Each event already carries
+  // its own SGD conversion based on the event's ex-date FX rate.
   const byYearCcySgd = useMemo(() => {
     const m: Record<string, Record<string, number>> = {};
     for (const e of events) {
       const y = (e.ex_date || "").slice(0, 4);
       if (!y) continue;
       if (!m[y]) m[y] = {};
-      m[y][e.currency] = (m[y][e.currency] || 0) + (e.total_received || 0);
+      m[y][e.currency] = (m[y][e.currency] || 0) + (e.total_received_base || 0);
     }
-    const out: Record<string, Record<string, number>> = {};
-    for (const [y, byCcy] of Object.entries(m)) {
-      const nativeTotal = Object.values(byCcy).reduce((a, b) => a + b, 0);
-      const sgdTotal = Number(yearTotalsSgd[y] || 0);
-      const rate = nativeTotal > 0 ? sgdTotal / nativeTotal : 0;
-      out[y] = {};
-      for (const [c, v] of Object.entries(byCcy)) {
-        out[y][c] = v * rate;
-      }
-    }
-    return out;
-  }, [events, yearTotalsSgd]);
-
-  // Per-currency-per-year conversion rate to SGD
-  const yearCcyRates = useMemo(() => {
-    const byYearCcy = (summary.by_year_by_ccy || {}) as Record<string, Record<string, number>>;
-    const out: Record<string, Record<string, number>> = {};
-    for (const [y, byCcy] of Object.entries(byYearCcy)) {
-      const sgdTotal = Number(yearTotalsSgd[y] || 0);
-      const ccyList = Object.keys(byCcy);
-      if (ccyList.length === 1) {
-        const c = ccyList[0];
-        const native = Number(byCcy[c]);
-        out[y] = { [c]: native > 0 ? sgdTotal / native : 0 };
-      } else {
-        const sgdNative = Number(byCcy["SGD"] || 0);
-        const sgdEquivForOthers = sgdTotal - sgdNative;
-        out[y] = { SGD: 1.0 };
-        for (const [c, native] of Object.entries(byCcy)) {
-          if (c === "SGD") continue;
-          const n = Number(native);
-          out[y][c] = n > 0 ? sgdEquivForOthers / n : 0;
-        }
-      }
-    }
-    return out;
-  }, [summary, yearTotalsSgd]);
-
-  const rateOf = (e: any) => {
-    const y = (e.ex_date || "").slice(0, 4);
-    return yearCcyRates[y]?.[e.currency] ?? 0;
-  };
+    return m;
+  }, [events]);
 
   const monthlySgd = useMemo(() => {
     const m: Record<string, number> = {};
@@ -155,10 +116,10 @@ export default function Dividends() {
       if (isNaN(d.getTime())) continue;
       const y = String(d.getFullYear());
       const k = `${y}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-      m[k] = (m[k] || 0) + (e.total_received || 0) * (rateOf(e) || 0);
+      m[k] = (m[k] || 0) + (e.total_received_base || 0);
     }
     return m;
-  }, [events, yearCcyRates]);
+  }, [events]);
 
   const monthlySorted = useMemo(
     () => Object.entries(monthlySgd).sort(([a], [b]) => a.localeCompare(b)),
@@ -220,12 +181,12 @@ export default function Dividends() {
       if (!m[ccy]) m[ccy] = {};
       if (!m[ccy][sym]) m[ccy][sym] = { total: 0, events: 0, name: e.name || "", totalSgd: 0 };
       m[ccy][sym].total += e.total_received || 0;
-      m[ccy][sym].totalSgd += (e.total_received || 0) * (rateOf(e) || 0);
+      m[ccy][sym].totalSgd += e.total_received_base || 0;
       m[ccy][sym].events += 1;
       if (!m[ccy][sym].name && e.name) m[ccy][sym].name = e.name;
     }
     return m;
-  }, [events, yearCcyRates]);
+  }, [events]);
 
   const filteredEvents = useMemo(() => {
     const query = transactionSearch.trim().toLowerCase();
@@ -320,7 +281,7 @@ export default function Dividends() {
                       <Box sx={{ textAlign: "right", flexShrink: 0 }}>
                         <Typography variant="caption" color="text.secondary" sx={{ display: "block", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em" }}>Received</Typography>
                         <Typography variant="body1" sx={{ color: "success.main", fontWeight: 750, fontVariantNumeric: "tabular-nums" }}>{ccySymbol(e.currency)}{e.total_received.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Typography>
-                        <Typography variant="caption" color="text.secondary" sx={{ fontVariantNumeric: "tabular-nums" }}>= {fmtMoneyFull((e.total_received || 0) * (rateOf(e) || 0), BASE_CCY)}</Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ fontVariantNumeric: "tabular-nums" }}>= {fmtMoneyFull(e.total_received_base || 0, BASE_CCY)}</Typography>
                       </Box>
                     </Stack>
                     <Box sx={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 0.75, mt: 1.25, pt: 1, borderTop: 1, borderColor: "divider" }}>
@@ -343,7 +304,7 @@ export default function Dividends() {
                           <TableCell align="right" sx={{ display: { xs: "none", sm: "table-cell" }, fontVariantNumeric: "tabular-nums" }}>{e.shares_at_ex.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
                           <TableCell align="right" sx={{ display: { xs: "none", sm: "table-cell" }, color: "text.secondary", fontVariantNumeric: "tabular-nums" }}>{ccySymbol(e.currency)}{e.amount_per_share.toLocaleString("en-US", { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</TableCell>
                           <TableCell align="right" sx={{ fontWeight: 650, fontVariantNumeric: "tabular-nums" }}><Typography component="span" sx={{ color: "success.main", fontWeight: 700 }}>{ccySymbol(e.currency)}{e.total_received.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Typography></TableCell>
-                          <TableCell align="right" sx={{ fontWeight: 650, fontVariantNumeric: "tabular-nums" }}>{fmtMoneyFull((e.total_received || 0) * (rateOf(e) || 0), BASE_CCY)}</TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 650, fontVariantNumeric: "tabular-nums" }}>{fmtMoneyFull(e.total_received_base || 0, BASE_CCY)}</TableCell>
                         </TableRow>
                       ))}
                       {filteredEvents.length === 0 && <TableRow><TableCell colSpan={6} align="center"><Typography variant="body2" color="text.secondary">No dividend events</Typography></TableCell></TableRow>}

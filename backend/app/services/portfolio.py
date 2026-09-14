@@ -467,6 +467,7 @@ def build_currency_breakdown(
     capital_in_by_ccy: Optional[Dict[str, float]] = None,
     total_capital_base: Optional[float] = None,
     fx_service=None,
+    dividend_events: Optional[List[dict]] = None,
 ) -> dict:
     """Build a per-currency P&L table.
 
@@ -549,7 +550,22 @@ def build_currency_breakdown(
         sell_iso = r.sell_date.isoformat() if hasattr(r.sell_date, "isoformat") else str(r.sell_date)
         closed_pnl_base_by_ccy[r.currency] += _hist_rate(r.currency, sell_iso) * r.pnl
 
-    # Partiton dividends by symbol: open-position dividends vs closed-position
+    # Partition dividends by symbol: open-position dividends vs closed-position.
+    # Keep native totals for the row display and use the event's ex-date FX for
+    # all base-currency calculations.
+    open_div_base_by_ccy: Dict[str, float] = defaultdict(float)
+    closed_div_base_by_ccy: Dict[str, float] = defaultdict(float)
+    if dividend_events is not None and fx_service:
+        for e in dividend_events:
+            ccy = e.get("currency", "")
+            amount = e.get("total_received", 0) or 0
+            ex_date = e.get("ex_date", "")
+            event_base = amount * _hist_rate(ccy, ex_date)
+            if e.get("symbol", "").upper() in held_symbols:
+                open_div_base_by_ccy[ccy] += event_base
+            else:
+                closed_div_base_by_ccy[ccy] += event_base
+
     for sym, by_ccy in dividends_by_symbol_ccy.items():
         for ccy, amt in by_ccy.items():
             if sym in held_symbols:
@@ -580,10 +596,12 @@ def build_currency_breakdown(
         # P&L in base currency: use historical rate for cost, today's rate for value
         mv_base_hist = to_base(mv_native, ccy)
         cost_base_hist = cost_base_by_ccy.get(ccy, 0)
-        current_pnl_div_base = mv_base_hist - cost_base_hist + to_base(open_div_native, ccy)
+        open_div_base = open_div_base_by_ccy.get(ccy, to_base(open_div_native, ccy))
+        closed_div_base_at_date = closed_div_base_by_ccy.get(ccy, to_base(closed_div_native, ccy))
+        current_pnl_div_base = mv_base_hist - cost_base_hist + open_div_base
         # Use historical FX on sell date for closed PnL (not today's rate)
         closed_pnl_base = closed_pnl_base_by_ccy.get(ccy, to_base(closed_native, ccy))
-        closed_pnl_div_base = closed_pnl_base + to_base(closed_div_native, ccy)
+        closed_pnl_div_base = closed_pnl_base + closed_div_base_at_date
         overall_pnl_div_base = current_pnl_div_base + closed_pnl_div_base
 
         rows.append({
@@ -608,9 +626,9 @@ def build_currency_breakdown(
             "closed_pnl_base": round(closed_pnl_base, 2),
             "closed_pnl_div_base": round(closed_pnl_div_base, 2),
             "overall_pnl_div_base": round(overall_pnl_div_base, 2),
-            "current_div_base": round(to_base(open_div_native, ccy), 2),
-            "closed_div_base": round(to_base(closed_div_native, ccy), 2),
-            "total_div_base": round(to_base(total_div_native, ccy), 2),
+            "current_div_base": round(open_div_base, 2),
+            "closed_div_base": round(closed_div_base_at_date, 2),
+            "total_div_base": round(open_div_base + closed_div_base_at_date, 2),
             "capital_base": round(cost_base_hist, 2),
         })
 

@@ -44,7 +44,7 @@ export const api = {
   authLogout: () => request<{ status: string }>("/api/auth/logout", { method: "POST" }),
   summary: () => request<any>("/api/portfolio/summary"),
   currencyBreakdown: (base = "SGD") => request<any>(`/api/portfolio/currency-breakdown?base_currency=${base}`),
-  holdings: (refresh = false) => request<{ holdings: any[]; prices: any[] }>(`/api/portfolio/holdings?refresh=${refresh}`),
+  holdings: (refresh = false) => request<{ holdings: any[]; prices: any[]; totals?: any }>(`/api/portfolio/holdings?refresh=${refresh}`),
   transactions: (filters: { symbol?: string; market?: string } = {}) => {
     const q = new URLSearchParams();
     if (filters.symbol) q.set("symbol", filters.symbol);
